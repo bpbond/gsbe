@@ -32,25 +32,28 @@ read_csv("data-srdb/srdb-data.csv", show_col_types = FALSE) %>%
            Biome, Ecosystem_type, Ecosystem_state, 
            Rs_annual, Rs_growingseason) %>% 
     filter(!is.na(Longitude), !is.na(Latitude), !is.na(Study_midyear)) %>% 
-    filter(!is.na(Rs_growingseason) | !is.na(Rs_annual)) ->
+    filter(!is.na(Rs_growingseason) | !is.na(Rs_annual)) %>% 
+    filter(Manipulation == "None") ->
     srdb
 
 message(nrow(srdb), " rows of data")
 
 world <- ne_coastline()
+srdb_annual <- srdb %>% filter(is.na(Rs_annual))
 ggplot(world) + 
     geom_sf() + 
-    geom_point(data = filter(srdb, is.na(Rs_annual)), 
+    geom_point(data = srdb_annual, 
                aes(x = Longitude, y = Latitude, color = Biome),
                na.rm = TRUE) + 
-    ggtitle("SRDB Rs_annual")
+    ggtitle(paste0("SRDB Rs_annual N=", nrow(srdb_annual)))
 
+srdb_growingseason <- srdb %>% filter(is.na(Rs_growingseason))
 ggplot(world) + 
     geom_sf() + 
-    geom_point(data = filter(srdb, is.na(Rs_growingseason)), 
+    geom_point(data = srdb_growingseason, 
                aes(x = Longitude, y = Latitude, color = Biome),
                na.rm = TRUE) + 
-    ggtitle("SRDB Rs_growingseason")
+    ggtitle(paste0("SRDB Rs_growingseason N=", nrow(srdb_growingseason)))
 ```
 
 ## SPEI
