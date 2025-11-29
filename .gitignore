@@ -55,5 +55,5 @@ data-srdb/*.csv
 .DS_Store
 
 # Quarto
-/gsbe_files
+*_files/
 *.html

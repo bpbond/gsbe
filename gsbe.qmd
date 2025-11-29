@@ -5,6 +5,16 @@ format: html
 editor: visual
 ---
 
+```{r setup}
+#| include: false
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+theme_set(theme_bw())
+
+```
+
 ## SRDB
 
 Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
@@ -23,4 +33,12 @@ When you click the **Render** button a document will be generated that includes 
 
 ```{r}
 1 + 1
+```
+
+## Reproducibility
+
+```{r}
+#| echo: false
+
+sessionInfo()
 ```
