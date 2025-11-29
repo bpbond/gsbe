@@ -4,6 +4,7 @@ author: "bbl"
 format:
   html:
     code-fold: true
+toc: true
 editor: visual
 ---
 
@@ -39,10 +40,17 @@ message(nrow(srdb), " rows of data")
 world <- ne_coastline()
 ggplot(world) + 
     geom_sf() + 
-    geom_point(data = srdb, 
+    geom_point(data = filter(srdb, is.na(Rs_annual)), 
                aes(x = Longitude, y = Latitude, color = Biome),
-               na.rm = TRUE)
+               na.rm = TRUE) + 
+    ggtitle("SRDB Rs_annual")
 
+ggplot(world) + 
+    geom_sf() + 
+    geom_point(data = filter(srdb, is.na(Rs_growingseason)), 
+               aes(x = Longitude, y = Latitude, color = Biome),
+               na.rm = TRUE) + 
+    ggtitle("SRDB Rs_growingseason")
 ```
 
 ## SPEI
