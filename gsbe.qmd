@@ -1,7 +1,9 @@
 ---
 title: "gsbe"
 author: "bbl"
-format: html
+format:
+  html:
+    code-fold: true
 editor: visual
 ---
 
@@ -12,12 +14,36 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 theme_set(theme_bw())
+library(sf)
+library(rnaturalearth)
+library(readr)
 
 ```
 
 ## SRDB
 
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+```{r}
+#| fig-width: 12
+
+read_csv("data-srdb/srdb-data.csv", show_col_types = FALSE) %>% 
+    select(Author, Study_midyear, YearsOfData, 
+           Latitude, Longitude, Elevation, Manipulation, 
+           Biome, Ecosystem_type, Ecosystem_state, 
+           Rs_annual, Rs_growingseason) %>% 
+    filter(!is.na(Longitude), !is.na(Latitude), !is.na(Study_midyear)) %>% 
+    filter(!is.na(Rs_growingseason) | !is.na(Rs_annual)) ->
+    srdb
+
+message(nrow(srdb), " rows of data")
+
+world <- ne_coastline()
+ggplot(world) + 
+    geom_sf() + 
+    geom_point(data = srdb, 
+               aes(x = Longitude, y = Latitude, color = Biome),
+               na.rm = TRUE)
+
+```
 
 ## SPEI
 
