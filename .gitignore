@@ -47,3 +47,13 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Data
+data-srdb/*.csv
+
+# OS files
+.DS_Store
+
+# Quarto
+/gsbe_files
+*.html
