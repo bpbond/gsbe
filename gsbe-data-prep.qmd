@@ -39,6 +39,13 @@ read_csv("data-srdb/srdb-data.csv", show_col_types = FALSE) %>%
 
 message(nrow(srdb), " rows of data")
 
+message("There are ", sum(srdb$YearsOfData > 1, na.rm = TRUE), " multi-year observations")
+
+srdb %>% 
+    filter(YearsOfData == 1) ->
+    srdb
+message(nrow(srdb), " final rows of data")
+
 world <- ne_coastline()
 srdb_annual <- srdb %>% filter(is.na(Rs_annual))
 ggplot(world) + 
@@ -58,16 +65,24 @@ ggplot(world) +
 ```
 
 ```{r srdb-prep}
+#| fig-width: 12
 
 set.seed(12)
 srdb %>% 
-    slice_sample(n = 10) -> 
+    slice_sample(n = 20) -> 
     srdb_sample
 
 srdb_sample %>% 
     select(Longitude, Latitude) ->
     coords
 
+ggplot(world) + 
+    geom_sf() + 
+    geom_point(data = srdb_sample, 
+               aes(x = Longitude, y = Latitude, color = Biome),
+               size = 4,
+               na.rm = TRUE) + 
+    ggtitle(paste0("SRDB subsample N=", nrow(srdb_sample)))
 ```
 
 ## SPEI
