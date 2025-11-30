@@ -57,13 +57,7 @@ ggplot(world) +
     ggtitle(paste0("SRDB Rs_growingseason N=", nrow(srdb_growingseason)))
 ```
 
-## SPEI
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
-
-```{r read-spei}
-#| fig-height: 6
-#| fig-width: 10
+```{r srdb-prep}
 
 set.seed(12)
 srdb %>% 
@@ -73,6 +67,16 @@ srdb %>%
 srdb_sample %>% 
     select(Longitude, Latitude) ->
     coords
+
+```
+
+## SPEI
+
+We are using the ERA5–Drought dataset; see Keune et al. 2025 <https://www.nature.com/articles/s41597-025-04896-y>.
+
+```{r read-spei}
+#| fig-height: 6
+#| fig-width: 10
 
 files <- list.files(path = "data-spei/", pattern = "*.nc$", full.names = TRUE)
 message("Processing ", length(files), " SPEI files...")
@@ -97,12 +101,16 @@ ggplot(spei, aes(time, SPEI12, color = Biome, group = ID)) +
     theme(legend.position = "none") +
     ggtitle("SPEI12")
 
-# Summarise to annual
-# May want to change this later and preserve, e.g., growing season SPEI
+# Summarise to annual, January-March, and July-September
 spei %>% 
-    mutate(Year = year(time)) %>% 
+    mutate(Year = year(time), 
+           Month = month(time)) %>% 
+    arrange(time) %>% 
     group_by(Biome, ID, Year) %>% 
-    summarise(SPEI12 = mean(SPEI12), .groups = "drop") ->
+    summarise(SPEI12jas = mean(SPEI12[7:9]),
+              SPEI12jfm = mean(SPEI12[1:3]),
+              SPEI12 = mean(SPEI12),
+              .groups = "drop") ->
     spei_annual
 
 ggplot(spei_annual, aes(Year, SPEI12, color = Biome, group = ID)) + 
@@ -110,7 +118,29 @@ ggplot(spei_annual, aes(Year, SPEI12, color = Biome, group = ID)) +
     facet_grid(Biome~.) + 
     theme(legend.position = "none") +
     ggtitle("SPEI12 - annual mean")
- 
+
+message("Merging into SRDB data...")
+srdb_sample$ID <- seq_len(nrow(srdb_sample))
+srdb_sample$Year <- floor(srdb_sample$Study_midyear)
+srdb_sample$Year1 <- srdb_sample$Year - 1
+
+spei_annual %>% select(ID, Year, SPEI12) -> spei_annual_join
+spei_annual_join %>% rename(SPEI12_y1 = SPEI12) -> spei_annual_join_y1
+
+srdb_sample %>% 
+    left_join(spei_annual_join, by = c("ID" = "ID", "Year" = "Year")) %>% 
+    left_join(spei_annual_join_y1, by = c("ID" = "ID", "Year1" = "Year")) ->
+    srdb_sample
+
+ggplot(srdb_sample, aes(x = SPEI12_y1)) + geom_histogram(bins = 50) + 
+    facet_wrap(~Biome) +
+    ggtitle("SPEI12 previous year")
+
+ggplot(srdb_sample, aes(Year, SPEI12_y1, color = Biome)) + 
+    geom_point() + 
+    facet_grid(Biome~.) + 
+    theme(legend.position = "none") +
+    ggtitle("SPEI12 previous year")
 ```
 
 ## Climate data
@@ -128,4 +158,3 @@ When you click the **Render** button a document will be generated that includes 
 
 sessionInfo()
 ```
-
