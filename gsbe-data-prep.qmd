@@ -1,5 +1,5 @@
 ---
-title: "gsbe"
+title: "gsbe-data-prep"
 author: "bbl"
 format:
   html:
@@ -18,12 +18,13 @@ theme_set(theme_bw())
 library(sf)
 library(rnaturalearth)
 library(readr)
-
+library(terra)
+library(lubridate)
 ```
 
 ## SRDB
 
-```{r}
+```{r read-srdb}
 #| fig-width: 12
 
 read_csv("data-srdb/srdb-data.csv", show_col_types = FALSE) %>% 
@@ -60,8 +61,56 @@ ggplot(world) +
 
 When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
 
-```{r}
-1 + 1
+```{r read-spei}
+#| fig-height: 6
+#| fig-width: 10
+
+set.seed(12)
+srdb %>% 
+    slice_sample(n = 10) -> 
+    srdb_sample
+
+srdb_sample %>% 
+    select(Longitude, Latitude) ->
+    coords
+
+files <- list.files(path = "data-spei/", pattern = "*.nc$", full.names = TRUE)
+message("Processing ", length(files), " SPEI files...")
+spei_list <- list()
+for(f in files) {
+    x <- suppressWarnings(terra::rast(f)) 
+    dat <- terra::extract(x, coords)
+    dat$time <- terra::time(x)
+    spei_list[[f]] <- dat
+}
+bind_rows(spei_list) %>% 
+    as_tibble() -> spei
+spei$Biome <- srdb_sample$Biome[spei$ID]
+
+ggplot(spei, aes(x = SPEI12)) + geom_histogram(bins = 50) + 
+    facet_wrap(~Biome) +
+    ggtitle("SPEI12")
+
+ggplot(spei, aes(time, SPEI12, color = Biome, group = ID)) + 
+    geom_line() + 
+    facet_grid(Biome~.) + 
+    theme(legend.position = "none") +
+    ggtitle("SPEI12")
+
+# Summarise to annual
+# May want to change this later and preserve, e.g., growing season SPEI
+spei %>% 
+    mutate(Year = year(time)) %>% 
+    group_by(Biome, ID, Year) %>% 
+    summarise(SPEI12 = mean(SPEI12), .groups = "drop") ->
+    spei_annual
+
+ggplot(spei_annual, aes(Year, SPEI12, color = Biome, group = ID)) + 
+    geom_line() + 
+    facet_grid(Biome~.) + 
+    theme(legend.position = "none") +
+    ggtitle("SPEI12 - annual mean")
+ 
 ```
 
 ## Climate data
@@ -79,3 +128,4 @@ When you click the **Render** button a document will be generated that includes 
 
 sessionInfo()
 ```
+
