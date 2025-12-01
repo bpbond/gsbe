@@ -41,7 +41,7 @@ read_csv("data-srdb/srdb-data.csv", show_col_types = FALSE) %>%
 
 message(nrow(srdb), " rows of data")
 
-message("There are ", sum(srdb$YearsOfData > 1, na.rm = TRUE), " multi-year observations")
+message("There are ", sum(srdb$YearsOfData > 1, na.rm = TRUE), " multi-year observations to remove")
 
 srdb %>% 
     filter(YearsOfData == 1) ->
@@ -69,10 +69,12 @@ ggplot(world) +
 ```{r srdb-prep}
 #| fig-width: 12
 
-set.seed(12)
-srdb %>% 
-    slice_sample(n = 20) -> 
-    srdb_sample
+# Subsample SRDB data for quick testing
+# set.seed(12)
+# srdb %>% 
+#     slice_sample(n = 20) -> 
+#     srdb_sample
+srdb_sample <- srdb
 
 srdb_sample %>% 
     select(Longitude, Latitude) ->
@@ -95,26 +97,35 @@ We are using the ERA5–Drought dataset; see Keune et al. 2025 <https://www.natu
 #| fig-height: 6
 #| fig-width: 10
 
-files <- list.files(path = "data-spei/", pattern = "*.nc$", full.names = TRUE)
-message("Processing ", length(files), " SPEI files...")
-spei_list <- list()
-for(f in files) {
-    x <- suppressWarnings(terra::rast(f)) 
-    dat <- terra::extract(x, coords)
-    dat$time <- terra::time(x)
-    spei_list[[f]] <- dat
+SPEI_CACHE <- "SPEI_data_cache.csv"
+if(file.exists(SPEI_CACHE)) {
+    message("Reading data from SPEI cache...")
+    spei <- read_csv(SPEI_CACHE, col_types = "ddTc")    
+} else {
+    files <- list.files(path = "data-spei/", pattern = "*.nc$", full.names = TRUE)
+    message("Processing ", length(files), " SPEI files...")
+    spei_list <- list()
+    for(f in files) {
+        x <- suppressWarnings(terra::rast(f)) 
+        dat <- terra::extract(x, coords)
+        dat$time <- terra::time(x)
+        spei_list[[f]] <- dat
+    }
+    bind_rows(spei_list) %>% 
+        as_tibble() -> spei
+    spei$Biome <- srdb_sample$Biome[spei$ID]
+    
+    write_csv(spei, SPEI_CACHE)
 }
-bind_rows(spei_list) %>% 
-    as_tibble() -> spei
-spei$Biome <- srdb_sample$Biome[spei$ID]
+
 
 ggplot(spei, aes(x = SPEI12)) +
-    geom_histogram(bins = 50) + 
+    geom_histogram(bins = 50, na.rm = TRUE) + 
     facet_wrap(~Biome) +
     ggtitle("SPEI12")
 
 ggplot(spei, aes(time, SPEI12, color = Biome, group = ID)) + 
-    geom_line() + 
+    geom_line(na.rm = TRUE) + 
     facet_grid(Biome~.) + 
     theme(legend.position = "none") +
     ggtitle("SPEI12")
@@ -132,13 +143,13 @@ spei %>%
     spei_annual
 
 ggplot(spei_annual, aes(Year, SPEI12, color = Biome, group = ID)) + 
-    geom_line() + 
+    geom_line(na.rm = TRUE) + 
     facet_grid(Biome~.) + 
     theme(legend.position = "none") +
     ggtitle("SPEI12 - annual mean")
 
 ggplot(spei_annual, aes(Year, SPEI12jja, color = Biome, group = ID)) + 
-    geom_line() + 
+    geom_line(na.rm = TRUE) + 
     facet_grid(Biome~.) + 
     theme(legend.position = "none") +
     ggtitle("SPEI12 - jja")
@@ -157,19 +168,30 @@ srdb_sample %>%
     srdb_sample
 
 ggplot(srdb_sample, aes(x = SPEI12_y1)) + 
-    geom_histogram(bins = 50) + 
+    geom_histogram(bins = 50, na.rm = TRUE) + 
     geom_vline(xintercept = -0.84, linetype = 2, color = "red") +
     geom_vline(xintercept = -1.28, linetype = 2, color = "red") +
     geom_vline(xintercept = -1.65, linetype = 2, color = "red") +
     facet_wrap(~Biome) +
     ggtitle("SPEI12 previous year", 
-            subtitle = "Dashed lines show SPEI categories for mild, moderate, severe dryness")
+            subtitle = "Dashed lines show SPEI categories for mild, moderate, and severe dryness")
+
+```
+
+```{r}
+#| fig-height: 14
+#| fig-width: 10
 
 ggplot(srdb_sample, aes(Year, SPEI12_y1, color = Biome)) + 
-    geom_point() + 
+    geom_hline(yintercept = -0.84, linetype = 2, color = "red") +
+    geom_hline(yintercept = -1.28, linetype = 2, color = "red") +
+    geom_hline(yintercept = -1.65, linetype = 2, color = "red") +
+    geom_point(na.rm = TRUE) + 
     facet_grid(Biome~.) + 
     theme(legend.position = "none") +
-    ggtitle("SPEI12 previous year")
+    ggtitle("SPEI12 previous year",
+            subtitle = "Dashed lines show SPEI categories for mild, moderate, and severe dryness")
+
 ```
 
 ## Climate data
@@ -203,7 +225,7 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
     yr <- srdb_yrlonlat$Year[i]
     lon <- srdb_yrlonlat$Longitude[i]
     lat <- srdb_yrlonlat$Latitude[i]
-    message(i, "/", nrow(srdb_yrlonlat), ": ", yr, " ", lon, " ", lat)
+    message(i, "/", nrow(srdb_yrlonlat), ": ", yr, " ", lon, " ", lat, appendLF = FALSE)
     
     # Are data already in cache?
     cache %>% 
@@ -246,7 +268,7 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
 # At this point the cache data frame has all the needed data
 # Reshape, summarise to annual (NB this may change in the future),
 # and join with SRDB data
-message("Summarizing...")
+message("Summarizing and joining with SRDB data...")
 cache %>% 
     mutate(time = as.Date(time)) %>% 
     pivot_wider(names_from = "short_name") %>% 

@@ -60,3 +60,4 @@ rsconnect/
 *_files/
 *.html
 
+SPEI_data_cache.csv
