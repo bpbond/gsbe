@@ -243,6 +243,48 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
     }    
 }
 
+# At this point the cache data frame has all the needed data
+# Reshape, summarise to annual (NB this may change in the future),
+# and join with SRDB data
+message("Summarizing...")
+cache %>% 
+    mutate(time = as.Date(time)) %>% 
+    pivot_wider(names_from = "short_name") %>% 
+    group_by(Year, Longitude, Latitude) %>%
+    summarise(Tair = mean(Tair) - 273.1,
+              Tsoil_lev1 = mean(Tsoil_lev1) - 273.1,
+              Tsoil_lev2 = mean(Tsoil_lev2) - 273.1,
+              VWC_lev1 = mean(VWC_lev1),
+              VWC_lev2 = mean(VWC_lev2),
+              Precip = sum(Precip) * 1000,
+              LAI_high = max(LAI_high),
+              .groups = "drop") ->
+    cache_summary
+
+srdb_sample %>% 
+    left_join(cache_summary, by = c("Year", "Longitude", "Latitude")) ->
+    srdb_sample
+
+ggplot(world) + 
+    geom_sf() + 
+    geom_point(data = srdb_sample, 
+               aes(x = Longitude, y = Latitude, color = Tair),
+               na.rm = TRUE) + 
+    ggtitle("SRDB with ERA5 2m air temperature")
+
+ggplot(world) + 
+    geom_sf() + 
+    geom_point(data = srdb_sample, 
+               aes(x = Longitude, y = Latitude, color = Precip),
+               na.rm = TRUE) + 
+    ggtitle("SRDB with ERA5 total precipitation")
+
+ggplot(world) + 
+    geom_sf() + 
+    geom_point(data = srdb_sample, 
+               aes(x = Longitude, y = Latitude, color = LAI_high),
+               na.rm = TRUE) + 
+    ggtitle("SRDB with ERA5 max high LAI")
 
 ```
 
