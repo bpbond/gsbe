@@ -1,0 +1,8 @@
+name,short_name
+SFC (Ground or water surface); 2 metre temperature [C],Tair
+0-7[cm] DBLY (layer between 2 depths below land surface); Surf.temp/soil temp lev 1 (from 930804) [C],Tsoil_lev1
+7-28[cm] DBLY (layer between 2 depths below land surface); Deep soil tmp/soil temp lev2(from 930804) [C],Tsoil_lev2
+0-7[cm] DBLY (layer between 2 depths below land surface); Volumetric soil water layer 1 [m^3/m^3],VWC_lev1
+7-28[cm] DBLY (layer between 2 depths below land surface); Volumetric soil water layer 2 [m^3/m^3],VWC_lev2
+SFC (Ground or water surface); Total precipitation [m],Precip
+SFC (Ground or water surface); undefined [-],LAI_high
