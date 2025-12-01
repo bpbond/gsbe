@@ -203,7 +203,7 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
     yr <- srdb_yrlonlat$Year[i]
     lon <- srdb_yrlonlat$Longitude[i]
     lat <- srdb_yrlonlat$Latitude[i]
-    message(yr, " ", lon, " ", lat)
+    message(i, "/", nrow(srdb_yrlonlat), ": ", yr, " ", lon, " ", lat)
     
     # Are data already in cache?
     cache %>% 
