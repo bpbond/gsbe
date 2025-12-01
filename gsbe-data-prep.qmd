@@ -21,6 +21,7 @@ library(readr)
 library(terra)
 library(lubridate)
 library(DT)
+library(arrow)
 ```
 
 ## SRDB
@@ -32,9 +33,9 @@ read_csv("data-srdb/srdb-data.csv", show_col_types = FALSE) %>%
     select(Author, Study_midyear, YearsOfData, 
            Latitude, Longitude, Elevation, Manipulation, 
            Biome, Ecosystem_type, Ecosystem_state, 
-           Rs_annual, Rs_growingseason) %>% 
+           Rs_annual, Rh_annual, Rs_growingseason) %>% 
     filter(!is.na(Longitude), !is.na(Latitude), !is.na(Study_midyear)) %>% 
-    filter(!is.na(Rs_growingseason) | !is.na(Rs_annual)) %>% 
+    filter(!is.na(Rs_growingseason) | !is.na(Rs_annual) | !is.na(Rh_annual)) %>% 
     filter(Manipulation == "None") %>% 
     select(-Elevation, -Manipulation) %>% 
     mutate(Longitude = round(Longitude, 3),
@@ -59,6 +60,14 @@ ggplot(world) +
                aes(x = Longitude, y = Latitude, color = Biome),
                na.rm = TRUE) + 
     ggtitle(paste0("SRDB Rs_annual N=", nrow(srdb_annual)))
+
+srdb_rh_annual <- srdb %>% filter(!is.na(Rh_annual))
+ggplot(world) + 
+    geom_sf() + 
+    geom_point(data = srdb_rh_annual, 
+               aes(x = Longitude, y = Latitude, color = Biome),
+               na.rm = TRUE) + 
+    ggtitle(paste0("SRDB Rh_annual N=", nrow(srdb_rh_annual)))
 
 srdb_growingseason <- srdb %>% filter(is.na(Rs_growingseason))
 ggplot(world) + 
@@ -100,10 +109,10 @@ We are using the ERA5–Drought dataset; see Keune et al. 2025 <https://www.natu
 #| fig-height: 6
 #| fig-width: 10
 
-SPEI_CACHE <- "SPEI_data_cache.csv"
+SPEI_CACHE <- "SPEI_data_cache.parquet"
 if(file.exists(SPEI_CACHE)) {
     message("Reading data from SPEI cache...")
-    spei <- read_csv(SPEI_CACHE, col_types = "ddTc")    
+    spei <- arrow::read_parquet(SPEI_CACHE)    
 } else {
     files <- list.files(path = "data-spei/", pattern = "*.nc$", full.names = TRUE)
     message("Processing ", length(files), " SPEI files...")
@@ -118,7 +127,7 @@ if(file.exists(SPEI_CACHE)) {
         as_tibble() -> spei
     spei$Biome <- srdb_sample$Biome[spei$ID]
     
-    write_csv(spei, SPEI_CACHE)
+    arrow::write_parquet(spei, SPEI_CACHE)
 }
 
 
@@ -213,9 +222,10 @@ We use two strategies to deal with this:
 
 # Load cached data if available
 ERA5_SHORT_NAME <- read_csv("ERA5_short_names.csv", col_types = "cc")
-ERA5_CACHE <- "ERA5_data_cache.csv"
+ERA5_CACHE <- "ERA5_data_cache.parquet"
 if(file.exists(ERA5_CACHE)) {
-    cache <- read_csv(ERA5_CACHE, col_types = "dddTcd")    
+    message("Reading cache file ", ERA5_CACHE)
+    cache <- arrow::read_parquet(ERA5_CACHE)    
 } else {
     message("No ERA5 data cache found")
     cache <- tibble(Year = numeric(0), Longitude = numeric(0), Latitude = numeric(0))
@@ -265,8 +275,8 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
             select(Year, time, Longitude, Latitude, short_name, value) ->
             dat
         cache <- bind_rows(cache, dat)
-        message("\tAdding ", nrow(dat), " data rows to cache...")
-        write_csv(cache, ERA5_CACHE)
+        message("\tAdding ", nrow(dat), " data rows to cache ", ERA5_CACHE, "...")
+        arrow::write_parquet(cache, ERA5_CACHE)
     }
 }
 
