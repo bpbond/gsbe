@@ -20,6 +20,7 @@ library(rnaturalearth)
 library(readr)
 library(terra)
 library(lubridate)
+library(DT)
 ```
 
 ## SRDB
@@ -35,6 +36,7 @@ read_csv("data-srdb/srdb-data.csv", show_col_types = FALSE) %>%
     filter(!is.na(Longitude), !is.na(Latitude), !is.na(Study_midyear)) %>% 
     filter(!is.na(Rs_growingseason) | !is.na(Rs_annual)) %>% 
     filter(Manipulation == "None") %>% 
+    select(-Elevation, -Manipulation) %>% 
     mutate(Longitude = round(Longitude, 3),
            Latitude = round(Latitude, 3)) ->
     srdb
@@ -44,7 +46,8 @@ message(nrow(srdb), " rows of data")
 message("There are ", sum(srdb$YearsOfData > 1, na.rm = TRUE), " multi-year observations to remove")
 
 srdb %>% 
-    filter(YearsOfData == 1) ->
+    filter(YearsOfData == 1) %>% 
+    select(-YearsOfData) ->
     srdb
 message(nrow(srdb), " final rows of data")
 
@@ -136,9 +139,9 @@ spei %>%
            Month = month(time)) %>% 
     arrange(time) %>% 
     group_by(Biome, ID, Year) %>% 
-    summarise(SPEI12jja = mean(SPEI12[7:9]),
-              SPEI12jfm = mean(SPEI12[1:3]),
-              SPEI12 = mean(SPEI12),
+    summarise(SPEI12jja = round(mean(SPEI12[7:9]), 3),
+              SPEI12jfm = round(mean(SPEI12[1:3]), 3),
+              SPEI12 = round(mean(SPEI12), 3),
               .groups = "drop") ->
     spei_annual
 
@@ -208,6 +211,7 @@ We use two strategies to deal with this:
 #| fig-height: 6
 #| fig-width: 10
 
+# Load cached data if available
 ERA5_SHORT_NAME <- read_csv("ERA5_short_names.csv", col_types = "cc")
 ERA5_CACHE <- "ERA5_data_cache.csv"
 if(file.exists(ERA5_CACHE)) {
@@ -217,6 +221,7 @@ if(file.exists(ERA5_CACHE)) {
     cache <- tibble(Year = numeric(0), Longitude = numeric(0), Latitude = numeric(0))
 }
 
+# Get distinct year/location combinations -- that's we want to pull out of ERA5 files
 srdb_sample %>% 
     distinct(Year, Longitude, Latitude) ->
     srdb_yrlonlat
@@ -252,7 +257,7 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
         }
         
         # Extract, reshape, clean up
-        y <- terra::extract(x, srdb_yrlonlat[i,][-1])
+        y <- terra::extract(x, srdb_yrlonlat[i,][-1]) # this is the expensive step
         y %>% 
             pivot_longer(-ID) %>% 
             mutate(time = time(x), Year = yr, Longitude = lon, Latitude = lat) %>% 
@@ -262,7 +267,7 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
         cache <- bind_rows(cache, dat)
         message("\tAdding ", nrow(dat), " data rows to cache...")
         write_csv(cache, ERA5_CACHE)
-    }    
+    }
 }
 
 # At this point the cache data frame has all the needed data
@@ -273,13 +278,13 @@ cache %>%
     mutate(time = as.Date(time)) %>% 
     pivot_wider(names_from = "short_name") %>% 
     group_by(Year, Longitude, Latitude) %>%
-    summarise(Tair = mean(Tair) - 273.1,
-              Tsoil_lev1 = mean(Tsoil_lev1) - 273.1,
-              Tsoil_lev2 = mean(Tsoil_lev2) - 273.1,
-              VWC_lev1 = mean(VWC_lev1),
-              VWC_lev2 = mean(VWC_lev2),
-              Precip = sum(Precip) * 1000,
-              LAI_high = max(LAI_high),
+    summarise(Tair = round(mean(Tair) - 273.1, 2),
+              Tsoil_lev1 = round(mean(Tsoil_lev1) - 273.1, 2),
+              Tsoil_lev2 = round(mean(Tsoil_lev2) - 273.1, 2),
+              VWC_lev1 = round(mean(VWC_lev1), 3),
+              VWC_lev2 = round(mean(VWC_lev2), 3),
+              Precip = round(sum(Precip) * 1000, 2),
+              LAI_high = round(max(LAI_high), 2),
               .groups = "drop") ->
     cache_summary
 
@@ -287,6 +292,7 @@ srdb_sample %>%
     left_join(cache_summary, by = c("Year", "Longitude", "Latitude")) ->
     srdb_sample
 
+# A few sanity check plots
 ggplot(world) + 
     geom_sf() + 
     geom_point(data = srdb_sample, 
@@ -319,7 +325,7 @@ ggplot(world) +
 # Extract for SRDB points
 x <- rast("data-ERA5/ERA5_soil_type.grib")
 plot(x)
-y <- terra::extract(x, coords)
+y <- terra::extract(x, coords) # not time-varying, so fast
 names(y) <- c("ID", "Soil_type_number")
 
 # Attach names to numeric codes
@@ -329,6 +335,23 @@ soil_names <- tibble(strings = strsplit(units(x), "; ")[[1]]) %>%
 y <- y %>% left_join(soil_names, by = "Soil_type_number")
 
 srdb_sample <- bind_cols(srdb_sample, y[-1])
+```
+
+## Final joined dataset
+
+```{r}
+
+na_data <- is.na(srdb_sample$SPEI12)
+if(sum(na_data) > 0) {
+    message("Removing ", sum(na_data), " rows with no climate/SPEI data")
+    srdb_sample <- srdb_sample[!na_data,]
+}
+
+OUTFILE <- "srdb_joined_data.csv"
+message("Writing ", OUTFILE)
+write_csv(srdb_sample, OUTFILE)
+
+DT::datatable(srdb_sample)
 ```
 
 ## Reproducibility
