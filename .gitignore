@@ -49,7 +49,9 @@ po/*~
 rsconnect/
 
 # Data
-data-srdb/*.csv
+/data-srdb/*.csv
+/data-spei/*.nc
+/data-ERA5/*.grib
 
 # OS files
 .DS_Store
@@ -57,3 +59,5 @@ data-srdb/*.csv
 # Quarto
 *_files/
 *.html
+
+SPEI_data_cache.csv
