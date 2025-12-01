@@ -108,7 +108,8 @@ bind_rows(spei_list) %>%
     as_tibble() -> spei
 spei$Biome <- srdb_sample$Biome[spei$ID]
 
-ggplot(spei, aes(x = SPEI12)) + geom_histogram(bins = 50) + 
+ggplot(spei, aes(x = SPEI12)) +
+    geom_histogram(bins = 50) + 
     facet_wrap(~Biome) +
     ggtitle("SPEI12")
 
@@ -155,9 +156,14 @@ srdb_sample %>%
     left_join(spei_annual_join_y1, by = c("ID" = "ID", "Year1" = "Year")) ->
     srdb_sample
 
-ggplot(srdb_sample, aes(x = SPEI12_y1)) + geom_histogram(bins = 50) + 
+ggplot(srdb_sample, aes(x = SPEI12_y1)) + 
+    geom_histogram(bins = 50) + 
+    geom_vline(xintercept = -0.84, linetype = 2, color = "red") +
+    geom_vline(xintercept = -1.28, linetype = 2, color = "red") +
+    geom_vline(xintercept = -1.65, linetype = 2, color = "red") +
     facet_wrap(~Biome) +
-    ggtitle("SPEI12 previous year")
+    ggtitle("SPEI12 previous year", 
+            subtitle = "Dashed lines show SPEI categories for mild, moderate, severe dryness")
 
 ggplot(srdb_sample, aes(Year, SPEI12_y1, color = Biome)) + 
     geom_point() + 
@@ -168,7 +174,7 @@ ggplot(srdb_sample, aes(Year, SPEI12_y1, color = Biome)) +
 
 ## Climate data
 
-Ugh, the ERA5 data are *big* and operations are *slow*. I'm not a GIS expert, so spent a while playing around with `raster::crop()`, `raster::aggregate()`, etc., with little success.
+Ugh, the ERA5 data are *big* and operations are *slow*. I'm not a GIS expert, so spent a while playing around with `terra::crop()`, `raster::aggregate()`, etc., with little success.
 
 We use two strategies to deal with this:
 
@@ -217,6 +223,13 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
         }
         message("\tNo data in cache; extracting from ", f, "...")
         x <- terra::rast(f)
+        
+        # Make sure the time period is what we're expecting
+        if(!all(year(time(x)) == yr)) {
+            stop("Year is supposed to be ", yr, " but file data dates are different!")
+        }
+        
+        # Extract, reshape, clean up
         y <- terra::extract(x, srdb_yrlonlat[i,][-1])
         y %>% 
             pivot_longer(-ID) %>% 
@@ -228,10 +241,30 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
         message("\tAdding ", nrow(dat), " data rows to cache...")
         write_csv(cache, ERA5_CACHE)
     }    
-    
 }
 
 
+```
+
+## Soil type data
+
+```{r read-soil-types}
+#| warning: false
+#| fig-width: 12
+
+# Extract for SRDB points
+x <- rast("data-ERA5/ERA5_soil_type.grib")
+plot(x)
+y <- terra::extract(x, coords)
+names(y) <- c("ID", "Soil_type_number")
+
+# Attach names to numeric codes
+y$Soil_type_number <- as.character(y$Soil_type_number) # for join below
+soil_names <- tibble(strings = strsplit(units(x), "; ")[[1]]) %>% 
+    separate(strings, into = c("Soil_type_number", "Soil_type_name"), convert = TRUE, sep = "=")
+y <- y %>% left_join(soil_names, by = "Soil_type_number")
+
+srdb_sample <- bind_cols(srdb_sample, y[-1])
 ```
 
 ## Reproducibility
