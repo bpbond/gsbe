@@ -114,17 +114,29 @@ if(file.exists(SPEI_CACHE)) {
     message("Reading data from SPEI cache...")
     spei <- arrow::read_parquet(SPEI_CACHE)    
 } else {
-    files <- list.files(path = "data-spei/", pattern = "*.nc$", full.names = TRUE)
-    message("Processing ", length(files), " SPEI files...")
-    spei_list <- list()
-    for(f in files) {
-        x <- suppressWarnings(terra::rast(f)) 
-        dat <- terra::extract(x, coords)
-        dat$time <- terra::time(x)
-        spei_list[[f]] <- dat
+    
+    process_spei <- function(which_spei, coords) {
+        files <- list.files(path = "data-spei/", 
+                            pattern = paste0("^", which_spei, "_.*nc$"), 
+                            full.names = TRUE)
+        message("Processing ", length(files), " ", which_spei, " files...")
+        spei_list <- list()
+        for(f in files) {
+            x <- suppressWarnings(terra::rast(f)) 
+            dat <- terra::extract(x, coords)
+            dat$time <- terra::time(x)
+            spei_list[[f]] <- dat
+        }
+        bind_rows(spei_list) %>% 
+            as_tibble() %>% 
+            return()
     }
-    bind_rows(spei_list) %>% 
-        as_tibble() -> spei
+    
+    # The SPEI index comes in different 'accumulation periods' of drought;
+    # we're interested in 12, 24, 36, and 48 months
+    spei12 <- process_spei("SPEI12", coords)
+    #spei24 <- process_spei("SPEI24", coords)
+    spei <- spei12
     spei$Biome <- srdb_sample$Biome[spei$ID]
     
     arrow::write_parquet(spei, SPEI_CACHE)
