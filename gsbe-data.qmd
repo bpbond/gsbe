@@ -1,0 +1,75 @@
+---
+title: "gsbe-data"
+author: "bbl"
+format:
+  html:
+    code-fold: true
+toc: true
+editor: visual
+---
+
+```{r setup}
+#| include: false
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+theme_set(theme_bw())
+library(readr)
+library(lubridate)
+```
+
+## Dataset overview
+
+```{r read-data}
+#| fig-width: 10
+#| fig-height: 10
+
+dat <- read_csv("srdb_joined_data.csv", show_col_types = FALSE)
+
+message(nrow(dat), " rows of data")
+
+dat %>% 
+    filter(is.na(Rs_growingseason) | Rs_growingseason < 20) %>% 
+    filter(is.na(Rs_annual) | Rs_annual < 4000) %>% 
+    filter(is.na(Rh_annual) | Rh_annual < 2000) %>% 
+    replace_na(list(Biome = "Unknown")) ->
+    dat_filtered
+
+dat_filtered %>% 
+    select(Biome, Ecosystem_type, Rs_annual, Rh_annual, Rs_growingseason,
+           Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high) %>% 
+    pivot_longer(Tair:LAI_high, names_to = "covariate_name", values_to = "covariate_value") %>% 
+    pivot_longer(Rs_annual:Rs_growingseason) %>% 
+    ggplot(aes(value, covariate_value, color = Biome)) + 
+        facet_grid(covariate_name ~ name, scales = "free") +
+        geom_point(na.rm = TRUE)
+
+dat_filtered %>% 
+    filter(!Biome == "Semi-arid", !Biome == "Unknown") %>% 
+    select(Biome, Ecosystem_type, Rs_annual, 
+           Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high) %>% 
+    pivot_longer(Tair:LAI_high, names_to = "covariate_name", values_to = "covariate_value") %>% 
+    ggplot(aes(Rs_annual, covariate_value, color = Biome)) + 
+        facet_grid(covariate_name ~ Biome, scales = "free") +
+        geom_point(na.rm = TRUE)
+ 
+stn <- as.factor(dat_filtered$Soil_type_number)
+nst <- length(unique(stn))
+dat_filtered %>% 
+    select(Rs_growingseason, Rs_annual, Rh_annual) %>% 
+    pairs(col = hcl.colors(nst, "Temps")[stn])
+
+# Groups
+
+
+
+```
+
+## Reproducibility
+
+```{r}
+#| echo: false
+
+sessionInfo()
+```
