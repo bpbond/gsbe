@@ -109,7 +109,7 @@ We are using the ERA5–Drought dataset; see Keune et al. 2025 <https://www.natu
 #| fig-height: 6
 #| fig-width: 10
 
-SPEI_CACHE <- "SPEI_data_cache.parquet"
+SPEI_CACHE <- "caches/SPEI_data_cache.parquet"
 if(file.exists(SPEI_CACHE)) {
     message("Reading data from SPEI cache...")
     spei <- arrow::read_parquet(SPEI_CACHE)    
@@ -234,7 +234,7 @@ We use two strategies to deal with this:
 
 # Load cached data if available
 ERA5_SHORT_NAME <- read_csv("ERA5_short_names.csv", col_types = "cc")
-ERA5_CACHE <- "ERA5_data_cache.parquet"
+ERA5_CACHE <- "caches/ERA5_data_cache.parquet"
 if(file.exists(ERA5_CACHE)) {
     message("Reading cache file ", ERA5_CACHE)
     cache <- arrow::read_parquet(ERA5_CACHE)    
@@ -359,6 +359,77 @@ y <- y %>% left_join(soil_names, by = "Soil_type_number")
 srdb_sample <- bind_cols(srdb_sample, y[-1])
 ```
 
+## MODIS NPP
+
+```{r modis-npp}
+#| fig-width: 12
+
+# Load cached data if available
+MODIS_NPP_CACHE <- "caches/MODIS_NPP_cache.parquet"
+if(file.exists(MODIS_NPP_CACHE)) {
+    message("Reading cache file ", MODIS_NPP_CACHE)
+    cache <- arrow::read_parquet(MODIS_NPP_CACHE)    
+} else {
+    message("No MODIS NPP data cache found")
+    cache <- tibble(Year = numeric(0), 
+                    Longitude = numeric(0), Latitude = numeric(0),
+                    MODIS_NPP = numeric(0))
+}
+
+# srdb_yrlonlat (the unique combinations of location and time)
+# was already calculated above
+for(i in seq_len(nrow(srdb_yrlonlat))) {
+    yr <- srdb_yrlonlat$Year[i]
+    lon <- srdb_yrlonlat$Longitude[i]
+    lat <- srdb_yrlonlat$Latitude[i]
+    message(i, "/", nrow(srdb_yrlonlat), ": ", yr, " ", lon, " ", lat, appendLF = FALSE)
+    
+    # Are data already in cache?
+    cache %>% 
+        filter(Year == yr, Longitude == lon, Latitude == lat) ->
+        dat
+    if(nrow(dat) > 0) {
+        message("\t", nrow(dat), " data rows are in cache")
+    } else {
+        # Use MODISTools to download the needed data
+        
+        message("\tNo data in cache; querying MODIS products...")
+        npp <- NULL
+        try({
+        npp <- mt_subset("MOD17A3HGF", 
+                         band = "Npp_500m", 
+                         lat = lat, lon = lon, 
+                         start = paste0(yr, "-01-01"), end = paste0(yr, "-12-31"))
+        })
+        if(is.null(npp)) {
+            npp_dat <- tibble(Year = yr, 
+                              Longitude = lon, Latitude = lat, 
+                              MODIS_NPP = NA_real_)
+        } else {
+            npp_dat <- tibble(Year = yr, 
+                              Longitude = lon, Latitude = lat, 
+                              MODIS_NPP = npp$value / 10)
+        }
+        
+        cache <- bind_rows(cache, npp_dat)
+        arrow::write_parquet(cache, MODIS_NPP_CACHE)
+    }
+}
+
+# Join and make a sanity-check plot
+srdb_sample %>% 
+    left_join(cache, by = c("Year", "Longitude", "Latitude")) ->
+    srdb_sample
+
+ggplot(world) + 
+    geom_sf() + 
+    geom_point(data = srdb_sample, 
+               aes(x = Longitude, y = Latitude, color = MODIS_NPP),
+               na.rm = TRUE) + 
+    ggtitle("SRDB with MOD17A3HGF NPP")
+
+```
+
 ## Final joined dataset
 
 ```{r}
@@ -383,3 +454,4 @@ DT::datatable(srdb_sample)
 
 sessionInfo()
 ```
+

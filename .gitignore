@@ -61,4 +61,4 @@ rsconnect/
 *.html
 
 # Caches
-SPEI_data_cache.parquet
+caches/SPEI_data_cache.parquet
