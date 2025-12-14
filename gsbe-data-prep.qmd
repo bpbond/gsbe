@@ -364,6 +364,8 @@ srdb_sample <- bind_cols(srdb_sample, y[-1])
 ```{r modis-npp}
 #| fig-width: 12
 
+library(MODISTools)
+
 # Load cached data if available
 MODIS_NPP_CACHE <- "caches/MODIS_NPP_cache.parquet"
 if(file.exists(MODIS_NPP_CACHE)) {
