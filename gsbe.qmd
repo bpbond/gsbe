@@ -38,8 +38,9 @@ dat %>%
 
 dat_filtered %>% 
     select(Biome, Ecosystem_type, Rs_annual, Rh_annual, Rs_growingseason,
-           Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high) %>% 
-    pivot_longer(Tair:LAI_high, names_to = "covariate_name", values_to = "covariate_value") %>% 
+           Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high, 
+           MODIS_NPP, MODIS_GPP) %>% 
+    pivot_longer(Tair:MODIS_GPP, names_to = "covariate_name", values_to = "covariate_value") %>%
     pivot_longer(Rs_annual:Rs_growingseason) %>% 
     ggplot(aes(value, covariate_value, color = Biome)) + 
         facet_grid(covariate_name ~ name, scales = "free") +
@@ -73,14 +74,20 @@ dat_filtered %>%
 # Identify observations not in a drought but WERE in a drought
 # PBE = potential Birch effect
 dat_filtered %>% 
-    mutate(PBE = SPEI12 > -1 & SPEI12_y1 <= -1) ->
+    mutate(PBE = SPEI12 > 0 & SPEI12_y1 <= -1) ->
     dat_pbe
 
-m <- lm(Rs_annual ~ Tair + Tsoil_lev1 + Tsoil_lev2 + VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2) + PBE, data = dat_pbe)
+m <- lm(Rs_annual ~ Tair + Tsoil_lev1 + Tsoil_lev2 + 
+            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2) + 
+            Ecosystem_type * MODIS_GPP + MODIS_NPP + 
+            Ecosystem_type * PBE, 
+        data = dat_pbe)
 summary(m)
 
+m_reduced <- MASS::stepAIC(m)
+summary(m_reduced)
 library(car)
-car::Anova(m, type = "III")
+car::Anova(m_reduced, type = "III")
 ```
 
 ## Reproducibility
