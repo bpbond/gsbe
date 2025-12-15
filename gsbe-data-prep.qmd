@@ -263,19 +263,25 @@ srdb_sample %>%
     distinct(Year, Longitude, Latitude) ->
     srdb_yrlonlat
 
+cache_hits <- 0
 for(i in seq_len(nrow(srdb_yrlonlat))) {
     yr <- srdb_yrlonlat$Year[i]
     lon <- srdb_yrlonlat$Longitude[i]
     lat <- srdb_yrlonlat$Latitude[i]
-    message(i, "/", nrow(srdb_yrlonlat), ": ", yr, " ", lon, " ", lat, appendLF = FALSE)
     
     # Are data already in cache?
     cache %>% 
         filter(Year == yr, Longitude == lon, Latitude == lat) ->
         dat
     if(nrow(dat) > 0) {
-        message("\t", nrow(dat), " data rows are in cache")
+        cache_hits <- cache_hits + 1
+        #message("\t", nrow(dat), " data rows are in cache")
     } else {
+        if(cache_hits > 0) { 
+            message("(", cache_hits, " cache hits)")
+            cache_hits <- 0
+        }
+        message(i, "/", nrow(srdb_yrlonlat), ": ", yr, " ", lon, " ", lat, appendLF = FALSE)
         # Construct year-specific file name; these were downloaded from ECMWF
         # and contain 2m temperature, soil temperature levels 1 and 2, 
         # volumetric soil water content levels 1 and 2, total precipitation,
@@ -395,21 +401,26 @@ if(file.exists(MODIS_NPP_CACHE)) {
 
 # srdb_yrlonlat (the unique combinations of location and time)
 # was already calculated above
+cache_hits <- 0
 for(i in seq_len(nrow(srdb_yrlonlat))) {
     yr <- srdb_yrlonlat$Year[i]
     lon <- srdb_yrlonlat$Longitude[i]
     lat <- srdb_yrlonlat$Latitude[i]
-    message(i, "/", nrow(srdb_yrlonlat), ": ", yr, " ", lon, " ", lat, appendLF = FALSE)
     
     # Are data already in cache?
     cache %>% 
         filter(Year == yr, Longitude == lon, Latitude == lat) ->
         dat
     if(nrow(dat) > 0) {
-        message("\t", nrow(dat), " data rows are in cache")
+        #message("\t", nrow(dat), " data rows are in cache")
+        cache_hits <- cache_hits + 1
     } else {
         # Use MODISTools to download the needed data
-        
+        if(cache_hits > 0) { 
+            message("(", last_cache_hits, " cache hits)")
+            cache_hits <- 0
+        }
+        message(i, "/", nrow(srdb_yrlonlat), ": ", yr, " ", lon, " ", lat, appendLF = FALSE)
         message("\tNo data in cache; querying MODIS NPP products...")
         npp <- NULL
         try({
@@ -476,21 +487,27 @@ if(file.exists(MODIS_GPP_CACHE)) {
 
 # srdb_yrlonlat (the unique combinations of location and time)
 # was already calculated above
+cache_hits <- 0
 for(i in seq_len(nrow(srdb_yrlonlat))) {
     yr <- srdb_yrlonlat$Year[i]
     lon <- srdb_yrlonlat$Longitude[i]
     lat <- srdb_yrlonlat$Latitude[i]
-    message(i, "/", nrow(srdb_yrlonlat), ": ", yr, " ", lon, " ", lat, appendLF = FALSE)
     
     # Are data already in cache?
     cache %>% 
         filter(Year == yr, Longitude == lon, Latitude == lat) ->
         dat
     if(nrow(dat) > 0) {
-        message("\t", nrow(dat), " data rows are in cache")
+        #message("\t", nrow(dat), " data rows are in cache")
+        cache_hits <- cache_hits + 1
     } else {
         # Use MODISTools to download the needed data
+        if(cache_hits > 0) { 
+            message("(", cache_hits, " cache hits)")
+            cache_hits <- 0
+        }
         
+        message(i, "/", nrow(srdb_yrlonlat), ": ", yr, " ", lon, " ", lat, appendLF = FALSE)
         message("\tNo data in cache; querying MODIS GPP products...")
         gpp <- NULL
         try({
@@ -563,3 +580,4 @@ DT::datatable(srdb_sample)
 
 sessionInfo()
 ```
+
