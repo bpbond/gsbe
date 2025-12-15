@@ -142,7 +142,7 @@ if(file.exists(SPEI_CACHE)) {
     arrow::write_parquet(spei, SPEI_CACHE)
 }
 
-
+# Distribution plots
 ggplot(spei, aes(x = SPEI12)) +
     geom_histogram(bins = 50, na.rm = TRUE) + 
     facet_wrap(~Biome) +
@@ -166,6 +166,7 @@ spei %>%
               .groups = "drop") ->
     spei_annual
 
+# Summary plots
 ggplot(spei_annual, aes(Year, SPEI12, color = Biome, group = ID)) + 
     geom_line(na.rm = TRUE) + 
     facet_grid(Biome~.) + 
@@ -202,7 +203,7 @@ ggplot(srdb_sample, aes(x = SPEI12_y1)) +
 
 ```
 
-```{r}
+```{r spei-over-time}
 #| fig-height: 14
 #| fig-width: 10
 
@@ -215,6 +216,20 @@ ggplot(srdb_sample, aes(Year, SPEI12_y1, color = Biome)) +
     theme(legend.position = "none") +
     ggtitle("SPEI12 previous year",
             subtitle = "Dashed lines show SPEI categories for mild, moderate, and severe dryness")
+
+# Are we identifying SPEI jumps in SRDB correctly?
+srdb_sample %>% 
+    filter(SPEI12 > 0 & SPEI12_y1 <= -1) %>% 
+    slice_sample(n = 10) -> 
+    srdb_pbe # "potential birch effect"
+
+spei_annual %>% 
+    filter(ID %in% srdb_pbe$ID) %>% 
+    left_join(select(srdb_pbe, ID, SRDB_Year = Year), by = "ID") %>% 
+    ggplot(aes(Year, SPEI12, color = SRDB_Year == Year)) + 
+    geom_point() + 
+    facet_grid(ID ~ .) +
+    ggtitle("Are we identifying SPEI jumps in SRDB correctly? (random 10)")
 
 ```
 
@@ -359,7 +374,7 @@ y <- y %>% left_join(soil_names, by = "Soil_type_number")
 srdb_sample <- bind_cols(srdb_sample, y[-1])
 ```
 
-## MODIS NPP
+## MODIS annual NPP
 
 ```{r modis-npp}
 #| fig-width: 12
@@ -395,7 +410,7 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
     } else {
         # Use MODISTools to download the needed data
         
-        message("\tNo data in cache; querying MODIS products...")
+        message("\tNo data in cache; querying MODIS NPP products...")
         npp <- NULL
         try({
         npp <- mt_subset("MOD17A3HGF", 
@@ -418,9 +433,16 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
     }
 }
 
+cache %>% 
+   # 32767 is the 'fill value' for this data product -- no measurement
+    # There are also some other values in the 32760s used for non-vegetated surfaces
+    # see https://lpdaac.usgs.gov/documents/972/MOD17_User_Guide_V61.pdf
+    mutate(MODIS_NPP = if_else(MODIS_NPP > 32760, NA_real_, MODIS_NPP)) ->
+    cache_summary
+
 # Join and make a sanity-check plot
 srdb_sample %>% 
-    left_join(cache, by = c("Year", "Longitude", "Latitude")) ->
+    left_join(cache_summary, by = c("Year", "Longitude", "Latitude")) ->
     srdb_sample
 
 ggplot(world) + 
@@ -432,9 +454,94 @@ ggplot(world) +
 
 ```
 
+## MODIS 8-day GPP
+
+This is *also* slow.
+
+```{r modis-gpp}
+#| fig-width: 12
+
+# Load cached data if available
+MODIS_GPP_CACHE <- "caches/MODIS_GPP_cache.parquet"
+if(file.exists(MODIS_GPP_CACHE)) {
+    message("Reading cache file ", MODIS_GPP_CACHE)
+    cache <- arrow::read_parquet(MODIS_GPP_CACHE)    
+} else {
+    message("No MODIS GPP data cache found")
+    cache <- tibble(Year = numeric(0), 
+                    calendar_date = character(0),
+                    Longitude = numeric(0), Latitude = numeric(0),
+                    MODIS_GPP = numeric(0))
+}
+
+# srdb_yrlonlat (the unique combinations of location and time)
+# was already calculated above
+for(i in seq_len(nrow(srdb_yrlonlat))) {
+    yr <- srdb_yrlonlat$Year[i]
+    lon <- srdb_yrlonlat$Longitude[i]
+    lat <- srdb_yrlonlat$Latitude[i]
+    message(i, "/", nrow(srdb_yrlonlat), ": ", yr, " ", lon, " ", lat, appendLF = FALSE)
+    
+    # Are data already in cache?
+    cache %>% 
+        filter(Year == yr, Longitude == lon, Latitude == lat) ->
+        dat
+    if(nrow(dat) > 0) {
+        message("\t", nrow(dat), " data rows are in cache")
+    } else {
+        # Use MODISTools to download the needed data
+        
+        message("\tNo data in cache; querying MODIS GPP products...")
+        gpp <- NULL
+        try({
+        gpp <- mt_subset("MOD17A2HGF", 
+                         band = "Gpp_500m", 
+                         lat = lat, lon = lon, 
+                         start = paste0(yr, "-01-01"), end = paste0(yr, "-12-31"))
+        })
+        if(is.null(gpp)) {
+            gpp_dat <- tibble(Year = yr, 
+                              calendar_date = NA_character_,
+                              Longitude = lon, Latitude = lat, 
+                              MODIS_GPP = NA_real_)
+        } else {
+            gpp_dat <- tibble(Year = yr, 
+                              calendar_date = gpp$calendar_date,
+                              Longitude = lon, Latitude = lat,
+                              MODIS_GPP = gpp$value)
+        }
+        
+        cache <- bind_rows(cache, gpp_dat)
+        arrow::write_parquet(cache, MODIS_GPP_CACHE)
+    }
+}
+
+# Summarise cache, join, sanity check plot
+cache %>% 
+    # 32767 is the 'fill value' for this data product -- no measurement
+    # There are also some other values in the 32760s used for non-vegetated surfaces
+    # see https://lpdaac.usgs.gov/documents/972/MOD17_User_Guide_V61.pdf
+    mutate(MODIS_GPP = if_else(MODIS_GPP > 32760, NA_real_, MODIS_GPP)) %>% 
+    group_by(Year, Longitude, Latitude) %>% 
+    summarise(MODIS_GPP = sum(MODIS_GPP) / 10.0, .groups = "drop") ->
+    cache_summary
+
+srdb_sample %>% 
+    left_join(cache_summary, by = c("Year", "Longitude", "Latitude")) ->
+    srdb_sample
+
+ggplot(world) + 
+    geom_sf() + 
+    geom_point(data = srdb_sample, 
+               aes(x = Longitude, y = Latitude, color = MODIS_GPP),
+               na.rm = TRUE) + 
+    ggtitle("SRDB with MOD17A2HGF GPP (annual)")
+
+```
+
 ## Final joined dataset
 
-```{r}
+```{r final-dataset}
 
 na_data <- is.na(srdb_sample$SPEI12)
 if(sum(na_data) > 0) {
@@ -456,4 +563,3 @@ DT::datatable(srdb_sample)
 
 sessionInfo()
 ```
-
