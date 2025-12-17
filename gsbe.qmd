@@ -67,19 +67,57 @@ dat_filtered %>%
 
 ```
 
+## Independent variable distribution
+
+```{r}
+dat_filtered %>% 
+    select(Rs_annual, Rh_annual, Rs_growingseason) %>% 
+    pivot_longer(everything()) %>% 
+    filter(!is.na(value), value > 0) %>% 
+    rename(none = value) %>% 
+    mutate(log = log(none), sqrt = sqrt(none)) %>% 
+    
+    pivot_longer(-name, names_to = "Transformation") %>% 
+    ggplot(aes(value, color = Transformation)) + 
+    geom_density() +
+    facet_wrap(~ name + Transformation, scales = "free")
+
+message("We have a winner: sqrt!")
+```
+
 ## Analysis1
 
 ```{r}
+#| eval: false
 
 # Identify observations not in a drought but WERE in a drought
 # PBE = potential Birch effect
-dat_filtered %>% 
-    mutate(PBE = SPEI12 > 0 & SPEI12_y1 <= -1) ->
-    dat_pbe
 
-m <- lm(Rs_annual ~ Tair + Tsoil_lev1 + Tsoil_lev2 + 
+
+run_analysis <- function(SPEI_boundary, x) {
+    x %>% 
+        mutate(PBE = SPEI12 > 0 & SPEI12_y1 <= -SPEI_boundary) ->
+        dat_pbe
+    
+    # Compute PBE flag
+    
+    # complete cases
+    
+    # rescale predictors (do beforehand)
+    
+    # compute distances between points (do beforehand)
+    
+    # compute variable inflation or other correlated predictors metric
+    
+    # fit ranger::ranger() or spatialRF::rf()
+    
+}
+
+
+
+m <- lm(sqrt(Rs_annual) ~ Tair + Tsoil_lev1 + Tsoil_lev2 + 
             VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2) + 
-            Ecosystem_type * MODIS_GPP + MODIS_NPP + 
+            MODIS_GPP + MODIS_NPP + 
             Ecosystem_type * PBE, 
         data = dat_pbe)
 summary(m)
