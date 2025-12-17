@@ -436,7 +436,7 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
         } else {
             npp_dat <- tibble(Year = yr, 
                               Longitude = lon, Latitude = lat, 
-                              MODIS_NPP = npp$value / 10)
+                              MODIS_NPP = npp$value)
         }
         
         cache <- bind_rows(cache, npp_dat)
@@ -448,7 +448,7 @@ cache %>%
    # 32767 is the 'fill value' for this data product -- no measurement
     # There are also some other values in the 32760s used for non-vegetated surfaces
     # see https://lpdaac.usgs.gov/documents/972/MOD17_User_Guide_V61.pdf
-    mutate(MODIS_NPP = if_else(MODIS_NPP > 32760, NA_real_, MODIS_NPP)) ->
+    mutate(MODIS_NPP = if_else(MODIS_NPP >= 32760, NA_real_, MODIS_NPP / 10.0)) ->
     cache_summary
 
 # Join and make a sanity-check plot
@@ -538,7 +538,7 @@ cache %>%
     # 32767 is the 'fill value' for this data product -- no measurement
     # There are also some other values in the 32760s used for non-vegetated surfaces
     # see https://lpdaac.usgs.gov/documents/972/MOD17_User_Guide_V61.pdf
-    mutate(MODIS_GPP = if_else(MODIS_GPP > 32760, NA_real_, MODIS_GPP)) %>% 
+    mutate(MODIS_GPP = if_else(MODIS_GPP >= 32760, NA_real_, MODIS_GPP)) %>% 
     group_by(Year, Longitude, Latitude) %>% 
     summarise(MODIS_GPP = sum(MODIS_GPP) / 10.0, .groups = "drop") ->
     cache_summary
@@ -580,4 +580,3 @@ DT::datatable(srdb_sample)
 
 sessionInfo()
 ```
-

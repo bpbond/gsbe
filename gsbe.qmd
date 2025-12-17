@@ -17,7 +17,47 @@ library(ggplot2)
 theme_set(theme_bw())
 library(readr)
 library(lubridate)
+
+dat <- read_csv("srdb_joined_data.csv", show_col_types = FALSE)
+
+message(nrow(dat), " rows of data")
+
+dat %>% 
+    filter(is.na(Rs_growingseason) | (Rs_growingseason > 0 & Rs_growingseason < 20)) %>% 
+    filter(is.na(Rs_annual) | (Rs_annual > 0 & Rs_annual < 4000)) %>% 
+    filter(is.na(Rh_annual) | (Rh_annual > 0 & Rh_annual < 2000)) %>% 
+    replace_na(list(Biome = "Unknown")) ->
+    dat_filtered
+
 ```
+
+## Independent variable distribution
+
+We have three potential independent variables – `Rs_annual` (annual soil respiration), `Rh_annual` (annual heterotrophic respiration), and `Rs_growingseason` (mean growing season soil respiration) – and expect their distributions to be non-normal.
+
+```{r}
+
+dat_filtered %>% 
+    select(Rs_annual, Rh_annual, Rs_growingseason) %>% 
+    pivot_longer(everything()) %>% 
+    filter(!is.na(value), value > 0) %>% 
+    rename(none = value) %>% 
+    mutate(log = log(none), sqrt = sqrt(none)) %>% 
+    
+    pivot_longer(-name, names_to = "Transformation") %>% 
+    ggplot(aes(value, color = Transformation)) + 
+    geom_density() +
+    facet_wrap(~ name + Transformation, scales = "free")
+
+dat_filtered %>% 
+    mutate(log_Rs_annual = log(Rs_annual),
+           log_Rh_annual = log(Rh_annual),
+           log_Rs_growingseason = log(Rs_growingseason)) ->
+    dat_filtered
+
+```
+
+We have a winner: `sqrt()`!
 
 ## Dataset overview
 
@@ -25,23 +65,12 @@ library(lubridate)
 #| fig-width: 10
 #| fig-height: 10
 
-dat <- read_csv("srdb_joined_data.csv", show_col_types = FALSE)
-
-message(nrow(dat), " rows of data")
-
-dat %>% 
-    filter(is.na(Rs_growingseason) | Rs_growingseason < 20) %>% 
-    filter(is.na(Rs_annual) | Rs_annual < 4000) %>% 
-    filter(is.na(Rh_annual) | Rh_annual < 2000) %>% 
-    replace_na(list(Biome = "Unknown")) ->
-    dat_filtered
-
 dat_filtered %>% 
-    select(Biome, Ecosystem_type, Rs_annual, Rh_annual, Rs_growingseason,
+    select(Biome, Ecosystem_type, log_Rs_annual, log_Rh_annual, log_Rs_growingseason,
            Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high, 
            MODIS_NPP, MODIS_GPP) %>% 
     pivot_longer(Tair:MODIS_GPP, names_to = "covariate_name", values_to = "covariate_value") %>%
-    pivot_longer(Rs_annual:Rs_growingseason) %>% 
+    pivot_longer(log_Rs_annual:log_Rs_growingseason) %>% 
     ggplot(aes(value, covariate_value, color = Biome)) + 
         facet_grid(covariate_name ~ name, scales = "free") +
         geom_point(na.rm = TRUE)
@@ -58,31 +87,9 @@ dat_filtered %>%
 stn <- as.factor(dat_filtered$Soil_type_number)
 nst <- length(unique(stn))
 dat_filtered %>% 
-    select(Rs_growingseason, Rs_annual, Rh_annual) %>% 
+    select(log_Rs_growingseason, log_Rs_annual, log_Rh_annual) %>% 
     pairs(col = hcl.colors(nst, "Temps")[stn])
 
-# Groups
-
-
-
-```
-
-## Independent variable distribution
-
-```{r}
-dat_filtered %>% 
-    select(Rs_annual, Rh_annual, Rs_growingseason) %>% 
-    pivot_longer(everything()) %>% 
-    filter(!is.na(value), value > 0) %>% 
-    rename(none = value) %>% 
-    mutate(log = log(none), sqrt = sqrt(none)) %>% 
-    
-    pivot_longer(-name, names_to = "Transformation") %>% 
-    ggplot(aes(value, color = Transformation)) + 
-    geom_density() +
-    facet_wrap(~ name + Transformation, scales = "free")
-
-message("We have a winner: sqrt!")
 ```
 
 ## Analysis1
