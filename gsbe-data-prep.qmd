@@ -561,6 +561,9 @@ ggplot(world) +
 ```{r final-dataset}
 #| fig-height: 8
 #| fig-width: 10
+srdb_sample %>% 
+    select(-Study_midyear, -ID, -Year1) ->
+    srdb_sample
 
 srdb_sample %>% 
     select(Year, Rs_annual, Rh_annual, Rs_growingseason) %>% 
@@ -569,7 +572,9 @@ srdb_sample %>%
     srdb_ivs
 
 srdb_sample %>% 
-    select(Year, Ecosystem_type, SPEI12, Tair, Soil_type_number, MODIS_NPP, MODIS_GPP) %>% 
+    select(Year, Ecosystem_type, SPEI12, 
+           Tair, 
+           MODIS_NPP, MODIS_GPP) %>% 
     pivot_longer(-Year, values_transform = as.character, values_drop_na = TRUE) %>% 
     mutate(Type = "2. Predictors") %>% 
     bind_rows(srdb_ivs) ->

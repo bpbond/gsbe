@@ -36,6 +36,8 @@ dat %>%
 We have three potential independent variables – `Rs_annual` (annual soil respiration), `Rh_annual` (annual heterotrophic respiration), and `Rs_growingseason` (mean growing season soil respiration) – and expect their distributions to be non-normal.
 
 ```{r}
+#| fig-width: 10
+#| fig-height: 8
 
 dat_filtered %>% 
     select(Rs_annual, Rh_annual, Rs_growingseason) %>% 
@@ -50,9 +52,9 @@ dat_filtered %>%
     facet_wrap(~ name + Transformation, scales = "free")
 
 dat_filtered %>% 
-    mutate(log_Rs_annual = log(Rs_annual),
-           log_Rh_annual = log(Rh_annual),
-           log_Rs_growingseason = log(Rs_growingseason)) ->
+    mutate(sqrt_Rs_annual = sqrt(Rs_annual),
+           sqrt_Rh_annual = sqrt(Rh_annual),
+           sqrt_Rs_growingseason = sqrt(Rs_growingseason)) ->
     dat_filtered
 
 ```
@@ -63,31 +65,31 @@ We have a winner: `sqrt()`!
 
 ```{r read-data}
 #| fig-width: 10
-#| fig-height: 10
+#| fig-height: 8
 
 dat_filtered %>% 
-    select(Biome, Ecosystem_type, log_Rs_annual, log_Rh_annual, log_Rs_growingseason,
+    select(Biome, Ecosystem_type, sqrt_Rs_annual, sqrt_Rh_annual, sqrt_Rs_growingseason,
            Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high, 
            MODIS_NPP, MODIS_GPP) %>% 
     pivot_longer(Tair:MODIS_GPP, names_to = "covariate_name", values_to = "covariate_value") %>%
-    pivot_longer(log_Rs_annual:log_Rs_growingseason) %>% 
+    pivot_longer(sqrt_Rs_annual:sqrt_Rs_growingseason) %>% 
     ggplot(aes(value, covariate_value, color = Biome)) + 
         facet_grid(covariate_name ~ name, scales = "free") +
         geom_point(na.rm = TRUE)
 
 dat_filtered %>% 
     filter(!Biome == "Semi-arid", !Biome == "Unknown") %>% 
-    select(Biome, Ecosystem_type, Rs_annual, 
+    select(Biome, Ecosystem_type, sqrt_Rs_annual, 
            Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high) %>% 
     pivot_longer(Tair:LAI_high, names_to = "covariate_name", values_to = "covariate_value") %>% 
-    ggplot(aes(Rs_annual, covariate_value, color = Biome)) + 
+    ggplot(aes(sqrt_Rs_annual, covariate_value, color = Biome)) + 
         facet_grid(covariate_name ~ Biome, scales = "free") +
         geom_point(na.rm = TRUE)
  
 stn <- as.factor(dat_filtered$Soil_type_number)
 nst <- length(unique(stn))
 dat_filtered %>% 
-    select(log_Rs_growingseason, log_Rs_annual, log_Rh_annual) %>% 
+    select(sqrt_Rs_growingseason, sqrt_Rs_annual, sqrt_Rh_annual) %>% 
     pairs(col = hcl.colors(nst, "Temps")[stn])
 
 ```
@@ -97,32 +99,43 @@ dat_filtered %>%
 ```{r}
 #| eval: false
 
-# Identify observations not in a drought but WERE in a drought
-# PBE = potential Birch effect
 
+fit_lm <- function(x) {} # fit linear model for a dataset; i.v. in first column
+fit_rf <- function(x) {} # fit random forest model
 
-run_analysis <- function(SPEI_boundary, x) {
-    x %>% 
-        mutate(PBE = SPEI12 > 0 & SPEI12_y1 <= -SPEI_boundary) ->
+do_k_fold <- function(x, k = 10) {} # compute fit statistics using k-fold
+
+# loop k times
+# assign training/validation
+
+# compute distances between points if using spatial RF
+# fit ranger::ranger() or spatialRF::rf()
+# predict and compute R2
+
+# fit_lm()
+# predict and compute R2
+
+# return fit statistics by model type
+
+do_full_analysis <- function(x, iv_set, spei_cutoff_values) {}
+# rescale predictors
+# complete.cases
+# compute variable inflation or other correlated predictors metric
+
+# loop over iv_set and spei_cutoff_values:
+
+# - compute PBE flag
+    dat_filtered %>% 
+        # identify observations not in a drought but WERE in a drought
+        # PBE = potential Birch effect
+        mutate(PBE = SPEI12 > 0 & SPEI12_y1 <= -1) ->
         dat_pbe
-    
-    # Compute PBE flag
-    
-    # complete cases
-    
-    # rescale predictors (do beforehand)
-    
-    # compute distances between points (do beforehand)
-    
-    # compute variable inflation or other correlated predictors metric
-    
-    # fit ranger::ranger() or spatialRF::rf()
-    
-}
+# - for each model type
+# --- fit model and calculate PBE effect
+# --- call do_k_fold
+# --- save fit data associated with this iv and cutoff value
 
-
-
-m <- lm(sqrt(Rs_annual) ~ Tair + Tsoil_lev1 + Tsoil_lev2 + 
+m <- lm(sqrt_Rs_annual ~ Tair + Tsoil_lev1 + Tsoil_lev2 + 
             VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2) + 
             MODIS_GPP + MODIS_NPP + 
             Ecosystem_type * PBE, 
@@ -142,3 +155,4 @@ car::Anova(m_reduced, type = "III")
 
 sessionInfo()
 ```
+
