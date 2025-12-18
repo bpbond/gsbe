@@ -559,6 +559,29 @@ ggplot(world) +
 ## Final joined dataset
 
 ```{r final-dataset}
+#| fig-height: 8
+#| fig-width: 10
+
+srdb_sample %>% 
+    select(Year, Rs_annual, Rh_annual, Rs_growingseason) %>% 
+    pivot_longer(-Year, values_transform = as.character, values_drop_na = TRUE) %>% 
+    mutate(Type = "1. IVs") ->
+    srdb_ivs
+
+srdb_sample %>% 
+    select(Year, Ecosystem_type, SPEI12, Tair, Soil_type_number, MODIS_NPP, MODIS_GPP) %>% 
+    pivot_longer(-Year, values_transform = as.character, values_drop_na = TRUE) %>% 
+    mutate(Type = "2. Predictors") %>% 
+    bind_rows(srdb_ivs) ->
+    srdb_predictors
+
+ggplot(srdb_predictors, aes(Year, name)) + 
+    geom_bin2d() + 
+    facet_grid(Type ~., scales = "free_y", space = "free_y")
+
+message("All observations: ", nrow(srdb_sample))
+message("Pre-2001 observations: ", sum(srdb_sample$Year < 2001))
+message("Pre-1985 observations: ", sum(srdb_sample$Year < 1985))
 
 na_data <- is.na(srdb_sample$SPEI12)
 if(sum(na_data) > 0) {
