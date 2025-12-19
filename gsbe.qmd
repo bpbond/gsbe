@@ -94,13 +94,9 @@ dat_filtered %>%
 
 ```
 
-## Analysis1
+## Test Random Forest model
 
-```{r}
-#| eval: false
-
-
-fit_lm <- function(x) {} # fit linear model; i.v. in first column
+```{r test-rf}
 
 # Fit random forest model; i.v. in first column
 library(ranger)
@@ -113,22 +109,38 @@ fit_and_test_rf <- function(x_train, x_val) {
     rss <- sum((preds - obs) ^ 2)
     tss <- sum((obs - mean(obs)) ^ 2)
 
-    return(list(training_r2 = rf$r.squared, 
+    return(list(model = rf,
+                training_r2 = rf$r.squared, 
                 vars = importance(rf), 
                 validation_r2 = 1 - rss / tss))
 } # fit random forest model
 
 dat_filtered %>% 
     select(Rs_annual, 
-           Ecosystem_type, SPEI12,
+           Ecosystem_type, SPEI12, #MODIS_NPP, MODIS_GPP,
            Tair:LAI_high, Soil_type_name) %>% 
     filter(complete.cases(.)) -> test
 
+message("The test dataset has ", dim(test)[1], " rows and ", dim(test)[2], " columns")
+dim(test)
 set.seed(123)
 groups <- sample.int(n = 10, size = nrow(test), replace = TRUE)
+test_train <- test[groups != 1,]
+test_val <- test[groups == 1,]
+message("The test training dataset has ", dim(test_train)[1], " rows and ", dim(test_train)[2], " columns")
+message("The test validation dataset has ", dim(test_val)[1], " rows and ", dim(test_val)[2], " columns")
 
-fit_and_test_rf(test[groups != 1,], x_val = test[groups == 1,])
+test_out <- fit_and_test_rf(x_train = test_train, x_val = test_val)
+print(test_out)
+```
 
+## Analysis1
+
+```{r}
+#| eval: false
+
+
+fit_lm <- function(x) {} # fit linear model; i.v. in first column
 
 do_k_fold <- function(x, k = 10) {
     if(!all(complete.cases(x))) {
@@ -151,7 +163,7 @@ do_k_fold <- function(x, k = 10) {
         message("\t\tTraining R2 = ", round(training_r2[i], 3))
         message("\t\tValidation R2 = ", round(validation_r2[i], 3))
     }
-    tibble(slice = seq_len(k), 
+    tibble(k = seq_len(k), 
            training_r2 = training_r2,
            validation_r2 = validation_r2)
 } # compute fit statistics using k-fold
@@ -159,28 +171,25 @@ do_k_fold <- function(x, k = 10) {
 
 # compute distances between points if using spatial RF
 # fit ranger::ranger() or spatialRF::rf()
-# predict and compute R2
-
-# fit_lm()
-# predict and compute R2
-
-# return fit statistics by model type
 
 # These are the three most common fluxes recorded in SRDB
-iv_set <- c("Rs_annual", "Rh_annual", "Rs_growingseason")
-iv_set <- c("sqrt_Rs_annual", "sqrt_Rh_annual", "sqrt_Rs_growingseason")
-# These are from Table 1 of Keune et al. (2025)
+iv_set <- c("Rs_annual")#, "Rh_annual", "Rs_growingseason")
+iv_set <- c("sqrt_Rs_annual")#, "sqrt_Rh_annual", "sqrt_Rs_growingseason")
+# The following SPI values are from Table 1 of Keune et al. (2025)
 # https://www.nature.com/articles/s41597-025-04896-y
+# and correspond to "severely dry", "moderately dry", and "mildly dry"
+# (there are no "extremely dry"=-2 in the dataset)
 spei_cutoffs <- c(-1.5, -1.0, 0.0)
 predictors <- c(#"Longitude", "Latitude", # hmmmmm
                 "Ecosystem_type", 
-                "SPEI12", "SPEI12_y1", 
+                "SPEI12", #"SPEI12_y1", 
                # "MODIS_NPP", "MODIS_GPP",
                 "Tair", "Precip",
                 "Tsoil_lev1", "Tsoil_lev2", "VWC_lev1", "VWC_lev2", 
                 "LAI_high", "Soil_type_name")
 
-do_full_analysis <- function(x, iv_set, predictors, spei_cutoffs) {
+set.seed(123)
+do_full_analysis <- function(x, iv_set, predictors, spei_cutoffs, k = 10) {
     results <- list()
     for(iv in iv_set) {
         
@@ -200,7 +209,7 @@ do_full_analysis <- function(x, iv_set, predictors, spei_cutoffs) {
             this_x$PBE = with(this_x, SPEI12 > 0 & SPEI12_y1 <= spei_cut)
             message("\tPBE = ", sum(this_x$PBE))
             
-            k_fold_out <- do_k_fold(this_x)
+            k_fold_out <- do_k_fold(this_x, k = k)
             k_fold_out$spei_cut <- spei_cut
             k_fold_out$iv = iv
             results[[paste(iv, spei_cut)]] <- k_fold_out
