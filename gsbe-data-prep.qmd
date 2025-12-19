@@ -111,22 +111,28 @@ For a drought index we are using the recent ERA5–Drought based on the 5th gene
 #| fig-height: 6
 #| fig-width: 10
 
+# Note that the SPEI cache is different from the others, because extracting
+# the data isn't that expensive. So instead of a point-by-point cache
+# query, we just use it entire if available, otherwise reprocess everything
 SPEI_CACHE <- "caches/SPEI_data_cache.parquet"
 if(file.exists(SPEI_CACHE)) {
     message("Reading data from SPEI cache...")
     spei <- arrow::read_parquet(SPEI_CACHE)    
-} else {
+}  else {
     
-    process_spei <- function(which_spei, coords) {
+    process_spei <- function(spei_window, coords) {
         files <- list.files(path = "data-spei/", 
-                            pattern = paste0("^", which_spei, "_.*nc$"), 
+                            pattern = paste0("^SPEI", spei_window, "_.*nc$"), 
                             full.names = TRUE)
-        message("Processing ", length(files), " ", which_spei, " files...")
+        message("Processing ", length(files), " SPEI", spei_window, " files...")
         spei_list <- list()
         for(f in files) {
+            #message(f)
             x <- suppressWarnings(terra::rast(f)) 
             dat <- terra::extract(x, coords)
+            colnames(dat)[2] <- "value" # this is SPEI12 or SPEI24
             dat$time <- terra::time(x)
+            dat$SPEI_window <- spei_window
             spei_list[[f]] <- dat
         }
         bind_rows(spei_list) %>% 
@@ -136,25 +142,25 @@ if(file.exists(SPEI_CACHE)) {
     
     # The SPEI index comes in different 'accumulation periods' of drought;
     # we're interested in 12 and 24 months
-    spei12 <- process_spei("SPEI12", coords)
-    #spei24 <- process_spei("SPEI24", coords)
-    spei <- spei12
-    spei$Biome <- srdb_sample$Biome[spei$ID]
+    spei12 <- process_spei(12, coords)
+    spei24 <- process_spei(24, coords)
+    bind_rows(spei12, spei24) %>%
+        filter(value != -9999) %>% 
+        pivot_wider(values_from =  value, names_from = SPEI_window, names_prefix = "SPEI") ->
+        spei
     
+    message("Writing new cache ", SPEI_CACHE)
     arrow::write_parquet(spei, SPEI_CACHE)
 }
+spei$Biome <- srdb_sample$Biome[spei$ID]
 
-# Distribution plots
-ggplot(spei, aes(x = SPEI12)) +
-    geom_histogram(bins = 50, na.rm = TRUE) + 
-    facet_wrap(~Biome) +
-    ggtitle("SPEI12")
-
-ggplot(spei, aes(time, SPEI12, color = Biome, group = ID)) + 
-    geom_line(na.rm = TRUE) + 
-    facet_grid(Biome~.) + 
-    theme(legend.position = "none") +
-    ggtitle("SPEI12")
+# Distribution plot
+spei %>% 
+    pivot_longer(cols = c(SPEI12, SPEI24)) %>% 
+    ggplot(aes(x = value, color = name)) + 
+    geom_density(na.rm = TRUE) + 
+    facet_wrap(~Biome) + 
+    ggtitle("Distribution of monthly SPEI data")
 
 # Summarise to annual, January-March, and July-September
 spei %>% 
@@ -165,6 +171,9 @@ spei %>%
     summarise(SPEI12jja = round(mean(SPEI12[7:9]), 3),
               SPEI12jfm = round(mean(SPEI12[1:3]), 3),
               SPEI12 = round(mean(SPEI12), 3),
+              SPEI24jja = round(mean(SPEI24[7:9]), 3),
+              SPEI24jfm = round(mean(SPEI24[1:3]), 3),
+              SPEI24 = round(mean(SPEI24), 3),
               .groups = "drop") ->
     spei_annual
 
@@ -175,19 +184,19 @@ ggplot(spei_annual, aes(Year, SPEI12, color = Biome, group = ID)) +
     theme(legend.position = "none") +
     ggtitle("SPEI12 - annual mean")
 
-ggplot(spei_annual, aes(Year, SPEI12jja, color = Biome, group = ID)) + 
+ggplot(spei_annual, aes(Year, SPEI24, color = Biome, group = ID)) + 
     geom_line(na.rm = TRUE) + 
     facet_grid(Biome~.) + 
     theme(legend.position = "none") +
-    ggtitle("SPEI12 - jja")
+    ggtitle("SPEI24 - annual mean")
 
 message("Merging into SRDB data...")
 srdb_sample$ID <- seq_len(nrow(srdb_sample))
 srdb_sample$Year <- floor(srdb_sample$Study_midyear)
 srdb_sample$Year1 <- srdb_sample$Year - 1
 
-spei_annual %>% select(ID, Year, SPEI12) -> spei_annual_join
-spei_annual_join %>% rename(SPEI12_y1 = SPEI12) -> spei_annual_join_y1
+spei_annual %>% select(ID, Year, SPEI12, SPEI24) -> spei_annual_join
+spei_annual_join %>% rename(SPEI12_y1 = SPEI12, SPEI24_y1 = SPEI24) -> spei_annual_join_y1
 
 srdb_sample %>% 
     left_join(spei_annual_join, by = c("ID" = "ID", "Year" = "Year")) %>% 
@@ -201,6 +210,15 @@ ggplot(srdb_sample, aes(x = SPEI12_y1)) +
     geom_vline(xintercept = -1.65, linetype = 2, color = "red") +
     facet_wrap(~Biome) +
     ggtitle("SPEI12 previous year", 
+            subtitle = "Dashed lines show SPEI categories for mild, moderate, and severe dryness")
+
+ggplot(srdb_sample, aes(x = SPEI24_y1)) + 
+    geom_histogram(bins = 50, na.rm = TRUE) + 
+    geom_vline(xintercept = -0.84, linetype = 2, color = "red") +
+    geom_vline(xintercept = -1.28, linetype = 2, color = "red") +
+    geom_vline(xintercept = -1.65, linetype = 2, color = "red") +
+    facet_wrap(~Biome) +
+    ggtitle("SPEI24 previous year", 
             subtitle = "Dashed lines show SPEI categories for mild, moderate, and severe dryness")
 
 ```
@@ -229,9 +247,9 @@ spei_annual %>%
     filter(ID %in% srdb_pbe$ID) %>% 
     left_join(select(srdb_pbe, ID, SRDB_Year = Year), by = "ID") %>% 
     ggplot(aes(Year, SPEI12, color = SRDB_Year == Year)) + 
-    geom_point() + 
+    geom_point(na.rm = TRUE) + 
     facet_grid(ID ~ .) +
-    ggtitle("Are we identifying SPEI jumps in SRDB correctly? (random 10)")
+    ggtitle("Are we identifying SPEI12 jumps (from <=-1 to >0) in SRDB correctly? (random 10)")
 
 ```
 
@@ -594,7 +612,8 @@ srdb_sample %>%
 
 ggplot(srdb_predictors, aes(Year, name)) + 
     geom_bin2d() + 
-    facet_grid(Type ~., scales = "free_y", space = "free_y")
+    facet_grid(Type ~., scales = "free_y", space = "free_y") +
+    ggtitle("Availability of independent variables and potential predictors over time")
 
 message("All observations: ", nrow(srdb_sample))
 message("Pre-2001 observations: ", sum(srdb_sample$Year < 2001))
