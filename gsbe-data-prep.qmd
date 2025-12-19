@@ -26,6 +26,8 @@ library(arrow)
 
 ## SRDB
 
+The Soil Respiration Database (SRBD) is described by [Jian et al. (2021)](https://essd.copernicus.org/articles/13/255/2021/).
+
 ```{r read-srdb}
 #| fig-width: 12
 
@@ -103,7 +105,7 @@ ggplot(world) +
 
 ## SPEI
 
-We are using the ERA5–Drought dataset; see Keune et al. 2025 <https://www.nature.com/articles/s41597-025-04896-y>.
+For a drought index we are using the recent ERA5–Drought based on the 5th generation ECMWF reanalysis system (ERA5). Its Standardized Precipitation Evapotranspiration Index (SPEI) is calculated over accumulation periods ranging from 1 month to 4 years; we use the 12 and 24 month products here. See [Keune et al. (2025)](https://www.nature.com/articles/s41597-025-04896-y).
 
 ```{r read-spei}
 #| fig-height: 6
@@ -133,7 +135,7 @@ if(file.exists(SPEI_CACHE)) {
     }
     
     # The SPEI index comes in different 'accumulation periods' of drought;
-    # we're interested in 12, 24, 36, and 48 months
+    # we're interested in 12 and 24 months
     spei12 <- process_spei("SPEI12", coords)
     #spei24 <- process_spei("SPEI24", coords)
     spei <- spei12
@@ -234,6 +236,8 @@ spei_annual %>%
 ```
 
 ## Climate data
+
+For each SRDB point we extract 2m air temperature, soil temperature and water content (levels 1 and 2), precipitation, and high-vegetation LAI from the [ERA5-Land monthly averaged data](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means?tab=overview) (available from 1950 to present; I downloaded 1985-2024).
 
 Ugh, the ERA5 data are *big* and operations are *slow*. I'm not a GIS expert, so spent a while playing around with `terra::crop()`, `raster::aggregate()`, etc., with little success.
 
@@ -361,6 +365,8 @@ ggplot(world) +
 
 ## Soil type data
 
+The soil type data are also from ERA5 but thankfully they're not time-varying, so fast and easy to extract.
+
 ```{r read-soil-types}
 #| warning: false
 #| fig-width: 12
@@ -381,6 +387,10 @@ srdb_sample <- bind_cols(srdb_sample, y[-1])
 ```
 
 ## MODIS annual NPP
+
+The MODIS Version 6.1 annual NPP product is at 500 meter (m) pixel resolution.
+
+Running, S. and Zhao, M.: MODIS/Terra net primary production gap-filled yearly L4 global 500m SIN grid V061, https://doi.org/10.5067/MODIS/MOD17A3HGF.061, 2021.
 
 ```{r modis-npp}
 #| fig-width: 12
@@ -467,7 +477,9 @@ ggplot(world) +
 
 ## MODIS 8-day GPP
 
-This is *also* slow.
+The GPP product is every eight days, 500 meter (m) resolution, and we sum it for an annual value.
+
+This process is *also* slow.
 
 ```{r modis-gpp}
 #| fig-width: 12
