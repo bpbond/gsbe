@@ -103,10 +103,35 @@ dat_filtered %>%
 fit_lm <- function(x) {} # fit linear model for a dataset; i.v. in first column
 fit_rf <- function(x) {} # fit random forest model
 
-do_k_fold <- function(x, k = 10) {} # compute fit statistics using k-fold
+do_k_fold <- function(x, k = 10) {
+    if(!all(complete.cases(x))) {
+        stop("x should not have any NAs at this stage!")
+    }
+    
+    groups <- sample.int(n = k, size = nrow(x), replace = TRUE)
+    training_r2 <- rep.int(NA_real_, k)
+    validation_r2 <- rep.int(NA_real_, k)
+    for(i in seq_len(k)) {
+        x_validation <- x[groups == i,]
+        x_training <- x[groups != i,]
+        message("\tk-fold ", i, ": training has ", nrow(x_training), 
+                "; validation has ", nrow(x_validation))
+        
+        m <- lm(speed ~ dist, data = x_training)
+        training_r2[i] <- summary(m)$r.squared
+        message("\t\tTraining R2 = ", round(training_r2[i], 3))
+        pred <- predict(m, newdata = x_validation)
+        rss <- sum((pred - x_validation$speed) ^ 2)
+        tss <- sum((x_validation$speed - mean(x_validation$speed)) ^ 2)
+        validation_r2[i] <- 1 - rss / tss
+        message("\t\tValidation R2 = ", round(validation_r2[i], 3))
+    }
+    m_overall <- lm(speed ~ dist, data = x)
+    message("\tAll-data R2 = ", summary(m)$r.squared)
+    message("\tMean training validation R2 = ", mean(training_r2))
+    message("\tMean validation validation R2 = ", mean(validation_r2))
+} # compute fit statistics using k-fold
 
-# loop k times
-# assign training/validation
 
 # compute distances between points if using spatial RF
 # fit ranger::ranger() or spatialRF::rf()
@@ -117,12 +142,51 @@ do_k_fold <- function(x, k = 10) {} # compute fit statistics using k-fold
 
 # return fit statistics by model type
 
-do_full_analysis <- function(x, iv_set, spei_cutoff_values) {}
+# These are the three most common fluxes recorded in SRDB
+iv_set <- c("sqrt_Rs_annual", "sqrt_Rh_annual", "sqrt_Rs_growingseason")
+# These are from Table 1 of Keune et al. (2025)
+# https://www.nature.com/articles/s41597-025-04896-y
+spei_cutoffs <- c(-1.5, -1.0, 0.0)
+predictors <- c("Longitude", "Latitude", # hmmmmm
+                "Ecosystem_type", 
+                "SPEI12", "SPEI12_y1", 
+                "MODIS_NPP", "MODIS_GPP",
+                "Tair", "Precip",
+                "Tsoil_lev1", "Tsoil_lev2", "VWC_lev1", "VWC_lev2", 
+                "LAI_high", "Soil_type_name")
+
+do_full_analysis <- function(x, iv_set, predictors, spei_cutoffs) {
+    results <- list()
+    for(iv in iv_set) {
+        
+        # Remove other potential independent variables
+        this_x <- x[c(iv, predictors)]
+        # Complete cases only
+        this_x <- this_x[complete.cases(this_x),]
+        
+        for(spei_cut in spei_cutoffs) {
+            message("---------------------------------------------")
+            message("iv = ", iv, ", spei_cut = ", spei_cut)
+            message("\tn = ", nrow(this_x))
+            
+            # identify observations not currently in a drought but that
+            # WERE in a drought the previous year
+            # PBE = potential Birch effect
+            this_x$PBE = with(this_x, SPEI12 > 0 & SPEI12_y1 <= spei_cut)
+            message("\tPBE = ", sum(this_x$PBE))
+            
+            results[[paste(iv, spei_cut)]] <- do_k_fold(this_x)
+        }
+    }
+}
+
+
 # rescale predictors
 # complete.cases
 # compute variable inflation or other correlated predictors metric
 
 # loop over iv_set and spei_cutoff_values:
+
 
 # - compute PBE flag
     dat_filtered %>% 
@@ -140,10 +204,9 @@ m <- lm(sqrt_Rs_annual ~ Tair + Tsoil_lev1 + Tsoil_lev2 +
             MODIS_GPP + MODIS_NPP + 
             Ecosystem_type * PBE, 
         data = dat_pbe)
-summary(m)
-
-m_reduced <- MASS::stepAIC(m)
+m_reduced <- MASS::stepAIC(m, trace = FALSE)
 summary(m_reduced)
+
 library(car)
 car::Anova(m_reduced, type = "III")
 ```
@@ -155,4 +218,3 @@ car::Anova(m_reduced, type = "III")
 
 sessionInfo()
 ```
-
