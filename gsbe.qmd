@@ -26,14 +26,16 @@ dat %>%
     filter(is.na(Rs_growingseason) | (Rs_growingseason > 0 & Rs_growingseason < 20)) %>% 
     filter(is.na(Rs_annual) | (Rs_annual > 0 & Rs_annual < 4000)) %>% 
     filter(is.na(Rh_annual) | (Rh_annual > 0 & Rh_annual < 2000)) %>% 
-    replace_na(list(Biome = "Unknown")) ->
+    replace_na(list(Ecosystem_type = "Unknown", Biome = "Unknown")) ->
     dat_filtered
+
+message("After filtering, ", nrow(dat_filtered), " rows of data")
 
 ```
 
 ## Independent variable distribution
 
-We have three potential independent variables – `Rs_annual` (annual soil respiration), `Rh_annual` (annual heterotrophic respiration), and `Rs_growingseason` (mean growing season soil respiration) – and expect their distributions to be non-normal.
+We have three potential independent variables – `Rs_annual` (annual soil respiration), `Rh_annual` (annual heterotrophic respiration), and `Rs_growingseason` (mean growing season soil respiration) – and their distributions are non-normal.
 
 ```{r}
 #| fig-width: 10
@@ -59,7 +61,7 @@ dat_filtered %>%
 
 ```
 
-We have a winner: `sqrt()`!
+We have a transformation winner: `sqrt()`!
 
 ## Dataset overview
 
@@ -121,8 +123,7 @@ dat_filtered %>%
            Tair:LAI_high, Soil_type_name) %>% 
     filter(complete.cases(.)) -> test
 
-message("The test dataset has ", dim(test)[1], " rows and ", dim(test)[2], " columns")
-dim(test)
+message("The test complete-cases dataset has ", dim(test)[1], " rows and ", dim(test)[2], " columns")
 set.seed(123)
 groups <- sample.int(n = 10, size = nrow(test), replace = TRUE)
 test_train <- test[groups != 1,]
@@ -147,16 +148,18 @@ do_k_fold <- function(x, k = 10) {
         stop("x should not have any NAs at this stage!")
     }
     
+    set.seed(123)
     groups <- sample.int(n = k, size = nrow(x), replace = TRUE)
     training_r2 <- rep.int(NA_real_, k)
     validation_r2 <- rep.int(NA_real_, k)
     for(i in seq_len(k)) {
         x_val <- x[groups == i,]
         x_train <- x[groups != i,]
-        message("\tk-fold ", i, ": training has ", nrow(x_train), 
-                "; validation has ", nrow(x_val))
+        message("\tk-fold ", i, ":")
+        message("\t\tTraining is ", nrow(x_train), " x ", ncol(x_train))
+        message("\t\tValidation is ", nrow(x_val), " x ", ncol(x_val))
 
-        rf_out <- fit_and_test_rf(x_val, x_train)
+        rf_out <- fit_and_test_rf(x_train = x_train, x_val = x_val)
         training_r2[i] <- rf_out$training_r2
         validation_r2[i] <- rf_out$validation_r2
         
@@ -174,45 +177,62 @@ do_k_fold <- function(x, k = 10) {
 
 # These are the three most common fluxes recorded in SRDB
 iv_set <- c("Rs_annual")#, "Rh_annual", "Rs_growingseason")
-iv_set <- c("sqrt_Rs_annual")#, "sqrt_Rh_annual", "sqrt_Rs_growingseason")
+#iv_set <- c("sqrt_Rs_annual", "sqrt_Rh_annual", "sqrt_Rs_growingseason")
+
 # The following SPI values are from Table 1 of Keune et al. (2025)
 # https://www.nature.com/articles/s41597-025-04896-y
 # and correspond to "severely dry", "moderately dry", and "mildly dry"
 # (there are no "extremely dry"=-2 in the dataset)
 spei_cutoffs <- c(-1.5, -1.0, 0.0)
+
+# What SPEI window should be used for the cutoffs above?
+spei_windows <- c(12, 24) # months
+
+# Model independent variables
 predictors <- c(#"Longitude", "Latitude", # hmmmmm
-                "Ecosystem_type", 
-                "SPEI12", #"SPEI12_y1", 
+                "Ecosystem_type",
+                "SPEI12",
                # "MODIS_NPP", "MODIS_GPP",
                 "Tair", "Precip",
                 "Tsoil_lev1", "Tsoil_lev2", "VWC_lev1", "VWC_lev2", 
                 "LAI_high", "Soil_type_name")
 
 set.seed(123)
-do_full_analysis <- function(x, iv_set, predictors, spei_cutoffs, k = 10) {
+do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs, k = 10) {
     results <- list()
+    SPEI_cols <- colnames(x)[grep("^SPEI", colnames(x))]
     for(iv in iv_set) {
         
-        # Remove other potential independent variables
-        this_x <- x[c(iv, predictors)]
-        # Complete cases only
-        this_x <- this_x[complete.cases(this_x),]
-        
-        for(spei_cut in spei_cutoffs) {
-            message("---------------------------------------------")
-            message("iv = ", iv, ", spei_cut = ", spei_cut)
-            message("\tn = ", nrow(this_x))
+        for(w in spei_windows) {
+            spei_past_col <- paste0("SPEI", w, "_y1")
             
-            # identify observations not currently in a drought but that
-            # WERE in a drought the previous year
-            # PBE = potential Birch effect
-            this_x$PBE = with(this_x, SPEI12 > 0 & SPEI12_y1 <= spei_cut)
-            message("\tPBE = ", sum(this_x$PBE))
+            for(spei_cut in spei_cutoffs) {
+                            # Remove other potential independent variables
+            this_x <- x[c(iv, union(predictors, SPEI_cols))]
+            # Complete cases only
+            this_x <- this_x[complete.cases(this_x),]
             
-            k_fold_out <- do_k_fold(this_x, k = k)
-            k_fold_out$spei_cut <- spei_cut
-            k_fold_out$iv = iv
-            results[[paste(iv, spei_cut)]] <- k_fold_out
+                message("---------------------------------------------")
+                message("iv = ", iv)
+                message("spei_cut = ", spei_cut, " window = ", w)
+                message("\tn = ", nrow(this_x))
+                
+                # identify observations not currently in a drought but that
+                # WERE in a drought the previous year
+                # PBE = potential Birch effect
+                this_x$PBE = this_x$SPEI12 > 0 & this_x[spei_past_col] <= spei_cut
+                message("\tPBE = ", sum(this_x$PBE))
+                
+                # Drop non-predictors entirely now
+                this_x <- this_x[c(iv, predictors, "PBE")]
+                
+                # Run the k-fold and save results
+                k_fold_out <- do_k_fold(this_x, k = k)
+                k_fold_out$spei_window = w
+                k_fold_out$spei_cut <- spei_cut
+                k_fold_out$iv = iv
+                results[[paste(iv, w, spei_cut)]] <- k_fold_out
+            }
         }
     }
     bind_rows(results)
