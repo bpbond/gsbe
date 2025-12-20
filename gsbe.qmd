@@ -126,7 +126,7 @@ fit_and_test_rf <- function(x_train, x_val) {
 
 dat_filtered %>% 
     select(sqrt_Rs_annual, #Longitude, Latitude,
-           Ecosystem_type, SPEI12, #MODIS_NPP, MODIS_GPP,
+           Ecosystem_type, SPEI12, MODIS_NPP, MODIS_GPP,
            Tair:LAI_high, Soil_type_name) %>% 
     # vivid::pdpVars() below needs things as factors not char
     mutate(Ecosystem_type = as.factor(Ecosystem_type),
@@ -168,7 +168,7 @@ stopifnot(packageVersion("spatialRF") >= "1.1.5")
 
 dat_filtered %>% 
     select(sqrt_Rs_annual, Longitude, Latitude,
-           Ecosystem_type, SPEI12, #MODIS_NPP, MODIS_GPP,
+           Ecosystem_type, SPEI12, MODIS_NPP, MODIS_GPP,
            Tair:LAI_high, Soil_type_name) %>% 
     filter(complete.cases(.)) -> 
     test
@@ -185,10 +185,38 @@ rf_sp <- spatialRF::rf(data = test,
                        distance.matrix = dm)
 ```
 
-## Analysis1
+## How important are the MODIS data?
+
+The MODIS data only start in 2001 (see `gsbe-data-prep` output), so requiring them in a model cuts off a lot of early data – on the order of 20%. Are they needed?
 
 ```{r}
-#| eval: false
+dat_filtered %>% 
+    select(sqrt_Rs_annual,
+           Ecosystem_type, SPEI12, MODIS_NPP, MODIS_GPP,
+           Tair:LAI_high, Soil_type_name) %>% 
+    filter(complete.cases(.)) -> 
+    test1
+rf_modis <- ranger(sqrt_Rs_annual ~ ., data = test1)
+
+dat_filtered %>% 
+    select(sqrt_Rs_annual, Longitude, Latitude,
+           Ecosystem_type, SPEI12, #MODIS_NPP, MODIS_GPP,
+           Tair:LAI_high, Soil_type_name) %>% 
+    filter(complete.cases(.)) -> 
+    test2
+rf_no_modis <- ranger(sqrt_Rs_annual ~ ., data = test1)
+
+message("Model *with* MODIS data OOB R2 = ", round(rf_modis$r.squared, 4))
+message("Model *without* MODIS data OOB R2 = ", round(rf_no_modis$r.squared, 4))
+
+```
+
+It doesn't seem like they're needed.
+
+## Analysis1
+
+```{r analysis1}
+#| eval: true
 
 
 fit_lm <- function(x) {} # fit linear model; i.v. in first column
@@ -205,16 +233,16 @@ do_k_fold <- function(x, k = 10) {
     for(i in seq_len(k)) {
         x_val <- x[groups == i,]
         x_train <- x[groups != i,]
-        message("\tk-fold ", i, ":")
-        message("\t\tTraining is ", nrow(x_train), " x ", ncol(x_train))
-        message("\t\tValidation is ", nrow(x_val), " x ", ncol(x_val))
+        # message("\tk-fold ", i, ":")
+        # message("\t\tTraining is ", nrow(x_train), " x ", ncol(x_train))
+        # message("\t\tValidation is ", nrow(x_val), " x ", ncol(x_val))
 
         rf_out <- fit_and_test_rf(x_train = x_train, x_val = x_val)
         training_r2[i] <- rf_out$training_r2
         validation_r2[i] <- rf_out$validation_r2
         
-        message("\t\tTraining R2 = ", round(training_r2[i], 3))
-        message("\t\tValidation R2 = ", round(validation_r2[i], 3))
+        # message("\t\tTraining R2 = ", round(training_r2[i], 3))
+        # message("\t\tValidation R2 = ", round(validation_r2[i], 3))
     }
     tibble(k = seq_len(k), 
            training_r2 = training_r2,
@@ -222,14 +250,12 @@ do_k_fold <- function(x, k = 10) {
 } # compute fit statistics using k-fold
 
 
-# compute distances between points if using spatial RF
-# fit ranger::ranger() or spatialRF::rf()
 
 # These are the three most common fluxes recorded in SRDB
-iv_set <- c("Rs_annual")#, "Rh_annual", "Rs_growingseason")
-#iv_set <- c("sqrt_Rs_annual", "sqrt_Rh_annual", "sqrt_Rs_growingseason")
+#iv_set <- c("Rs_annual")#, "Rh_annual", "Rs_growingseason")
+iv_set <- c("sqrt_Rs_annual", "sqrt_Rh_annual", "sqrt_Rs_growingseason")
 
-# The following SPI values are from Table 1 of Keune et al. (2025)
+# The following SPEI values are from Table 1 of Keune et al. (2025)
 # https://www.nature.com/articles/s41597-025-04896-y
 # and correspond to "severely dry", "moderately dry", and "mildly dry"
 # (there are no "extremely dry"=-2 in the dataset)
@@ -239,10 +265,8 @@ spei_cutoffs <- c(-1.5, -1.0, 0.0)
 spei_windows <- c(12, 24) # months
 
 # Model independent variables
-predictors <- c(#"Longitude", "Latitude", # hmmmmm
-                "Ecosystem_type",
+predictors <- c("Ecosystem_type",
                 "SPEI12",
-               # "MODIS_NPP", "MODIS_GPP",
                 "Tair", "Precip",
                 "Tsoil_lev1", "Tsoil_lev2", "VWC_lev1", "VWC_lev2", 
                 "LAI_high", "Soil_type_name")
@@ -257,11 +281,11 @@ do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs, 
             spei_past_col <- paste0("SPEI", w, "_y1")
             
             for(spei_cut in spei_cutoffs) {
-                            # Remove other potential independent variables
-            this_x <- x[c(iv, union(predictors, SPEI_cols))]
-            # Complete cases only
-            this_x <- this_x[complete.cases(this_x),]
-            
+                # Remove other potential independent variables
+                this_x <- x[c(iv, union(predictors, SPEI_cols))]
+                # Complete cases only
+                this_x <- this_x[complete.cases(this_x),]
+                
                 message("---------------------------------------------")
                 message("iv = ", iv)
                 message("spei_cut = ", spei_cut, " window = ", w)
@@ -292,37 +316,56 @@ out <- do_full_analysis(dat_filtered,
                         iv_set, predictors,
                         spei_windows = c(12,24),
                         spei_cutoffs = spei_cutoffs,
-                        k = 3)
+                        k = 10)
 
+out %>% 
+    group_by(spei_window, spei_cut, iv) %>% 
+    summarise(training_r2 = mean(training_r2), 
+              validation_r2 = mean(validation_r2)) %>% 
+    mutate(spei_cut = as.factor(spei_cut),
+           spei_window = paste(spei_window, "months")) ->
+    out_smry
 
-# rescale predictors
-# complete.cases
-# compute variable inflation or other correlated predictors metric
+ggplot(out_smry, aes(spei_cut, iv, fill = validation_r2)) + 
+    geom_tile() + 
+    facet_wrap(~spei_window) +
+    xlab("Previous-year SPEI cutoff") + ylab("")
 
-# loop over iv_set and spei_cutoff_values:
+out_smry %>% 
+    filter(spei_window == "12 months") %>% 
+    pivot_longer(cols = c(training_r2, validation_r2)) %>% 
+    ggplot(aes(spei_cut, iv, fill = value)) +
+    geom_tile() +
+    facet_wrap(~name) +
+    xlab("Previous-year SPEI cutoff") + ylab("") +
+    ggtitle("12-month SPEI window")
 
+```
 
-# - compute PBE flag
-    dat_filtered %>% 
-        # identify observations not in a drought but WERE in a drought
-        # PBE = potential Birch effect
-        mutate(PBE = SPEI12 > 0 & SPEI12_y1 <= -1) ->
-        dat_pbe
-# - for each model type
-# --- fit model and calculate PBE effect
-# --- call do_k_fold
-# --- save fit data associated with this iv and cutoff value
+## Test linear model
 
-m <- lm(sqrt_Rs_annual ~ Tair + Tsoil_lev1 + Tsoil_lev2 + 
-            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2) + 
-            MODIS_GPP + MODIS_NPP + 
-            Ecosystem_type * PBE, 
-        data = dat_pbe)
+```{r analysis2}
+
+dat_filtered %>% 
+    mutate(Ecosystem_type = as.factor(Ecosystem_type),
+           Soil_type_name = as.factor(Soil_type_name),
+           PBE = SPEI12_y1 <= -1 & SPEI12 > 0) %>% 
+    select(sqrt_Rs_annual, #Longitude, Latitude,
+           Ecosystem_type, SPEI12, PBE, 
+           Tair:LAI_high, Soil_type_name) %>% 
+    filter(complete.cases(.)) -> 
+    dat_linear
+
+m <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
+            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * PBE +
+            Ecosystem_type,
+        data = dat_linear)
 m_reduced <- MASS::stepAIC(m, trace = FALSE)
 summary(m_reduced)
 
 library(car)
 car::Anova(m_reduced, type = "III")
+
 ```
 
 ## Reproducibility
