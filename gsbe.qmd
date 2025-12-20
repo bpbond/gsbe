@@ -18,6 +18,14 @@ theme_set(theme_bw())
 library(readr)
 library(lubridate)
 
+```
+
+```{r read-data}
+
+SSD <- 123
+message("set.seed = ", SSD)
+set.seed(SSD)
+
 dat <- read_csv("srdb_joined_data.csv", show_col_types = FALSE)
 
 message(nrow(dat), " rows of data")
@@ -30,12 +38,19 @@ dat %>%
     dat_filtered
 
 message("After filtering, ", nrow(dat_filtered), " rows of data")
-
 ```
 
 ## Independent variable distribution
 
-We have three potential independent variables – `Rs_annual` (annual soil respiration), `Rh_annual` (annual heterotrophic respiration), and `Rs_growingseason` (mean growing season soil respiration) – and their distributions are non-normal.
+We have three potential independent variables:
+
+- `Rs_annual` (annual soil respiration)
+
+- `Rh_annual` (annual heterotrophic respiration)
+
+- `Rs_growingseason` (mean growing season soil respiration)
+
+Their distributions are expected to be non-normal, which is a problem for linear models and not ideal for anything. Evaluate possible transformations.
 
 ```{r}
 #| fig-width: 10
@@ -65,7 +80,7 @@ We have a transformation winner: `sqrt()`!
 
 ## Dataset overview
 
-```{r read-data}
+```{r prep-data}
 #| fig-width: 10
 #| fig-height: 8
 
@@ -155,36 +170,6 @@ pdpVars(data = test,
         vars = names(imps)[4:6])
 ```
 
-## Test spatial Random Forest
-
-Spatial autocorrelation wouldn't change the fit of the model, but it could bias the variable importance metrics. Evaluate.
-
-```{r spatial-rf}
-
-# This needs the newest version 1.1.5, not yet on CRAN
-# remotes::install_github(repo = "blasbenito/spatialRF",
-#   ref = "main", force = TRUE, quiet = TRUE)
-stopifnot(packageVersion("spatialRF") >= "1.1.5")
-
-dat_filtered %>% 
-    select(sqrt_Rs_annual, Longitude, Latitude,
-           Ecosystem_type, SPEI12, MODIS_NPP, MODIS_GPP,
-           Tair:LAI_high, Soil_type_name) %>% 
-    filter(complete.cases(.)) -> 
-    test
-
-# Compute distance between all pairs of points
-library(geodist)
-dm <- geodist(select(test, Longitude, Latitude), measure = "geodesic")
-test$Longitude <- test$Latitude <- NULL
-
-library(spatialRF)
-rf_sp <- spatialRF::rf(data = test, 
-                       dependent.variable.name = colnames(test)[1],
-                       predictor.variable.names = setdiff(colnames(test), colnames(test)[1]),
-                       distance.matrix = dm)
-```
-
 ## How important are the MODIS data?
 
 The MODIS data only start in 2001 (see `gsbe-data-prep` output), so requiring them in a model cuts off a lot of early data – on the order of 20%. Are they needed?
@@ -212,6 +197,36 @@ message("Model *without* MODIS data OOB R2 = ", round(rf_no_modis$r.squared, 4))
 ```
 
 It doesn't seem like they're needed.
+
+## Test spatial Random Forest
+
+Spatial autocorrelation wouldn't change the fit of the model, but it could bias the variable importance metrics. Evaluate.
+
+```{r spatial-rf}
+
+# This needs the newest version 1.1.5, not yet on CRAN
+# remotes::install_github(repo = "blasbenito/spatialRF",
+#   ref = "main", force = TRUE, quiet = TRUE)
+stopifnot(packageVersion("spatialRF") >= "1.1.5")
+
+dat_filtered %>% 
+    select(sqrt_Rs_annual, Longitude, Latitude,
+           Ecosystem_type, SPEI12, #MODIS_NPP, MODIS_GPP,
+           Tair:LAI_high, Soil_type_name) %>% 
+    filter(complete.cases(.)) -> 
+    test
+
+# Compute distance between all pairs of points
+library(geodist)
+dm <- geodist(select(test, Longitude, Latitude), measure = "geodesic")
+test$Longitude <- test$Latitude <- NULL
+
+library(spatialRF)
+rf_sp <- spatialRF::rf(data = test, 
+                       dependent.variable.name = colnames(test)[1],
+                       predictor.variable.names = setdiff(colnames(test), colnames(test)[1]),
+                       distance.matrix = dm)
+```
 
 ## Analysis1
 
@@ -271,7 +286,6 @@ predictors <- c("Ecosystem_type",
                 "Tsoil_lev1", "Tsoil_lev2", "VWC_lev1", "VWC_lev2", 
                 "LAI_high", "Soil_type_name")
 
-set.seed(123)
 do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs, k = 10) {
     results <- list()
     SPEI_cols <- colnames(x)[grep("^SPEI", colnames(x))]
@@ -318,6 +332,7 @@ out <- do_full_analysis(dat_filtered,
                         spei_cutoffs = spei_cutoffs,
                         k = 10)
 
+# Compute means across the k-folds
 out %>% 
     group_by(spei_window, spei_cut, iv) %>% 
     summarise(training_r2 = mean(training_r2), 
@@ -344,7 +359,7 @@ out_smry %>%
 
 ## Test linear model
 
-```{r analysis2}
+```{r test-linear}
 
 dat_filtered %>% 
     mutate(Ecosystem_type = as.factor(Ecosystem_type),
@@ -356,15 +371,33 @@ dat_filtered %>%
     filter(complete.cases(.)) -> 
     dat_linear
 
+message("Fitting linear model with PBE (SPEI12, -1.0) effect...")
 m <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
             VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * PBE +
             Ecosystem_type,
         data = dat_linear)
 m_reduced <- MASS::stepAIC(m, trace = FALSE)
 summary(m_reduced)
+par(mfrow = c(2, 2))
+plot(m_reduced)
 
 library(car)
 car::Anova(m_reduced, type = "III")
+
+message("Fitting linear model without PBE effect...")
+m_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
+            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) +
+            Ecosystem_type,
+        data = dat_linear)
+m_no_PBE_reduced <- MASS::stepAIC(m, trace = FALSE)
+
+tibble(model_with_PBE = predict(m),
+       model_without_PBE = predict(m_no_PBE),
+       PBE = dat_linear$PBE) %>% 
+    ggplot(aes(model_without_PBE, model_with_PBE)) + 
+    geom_point(aes(color = PBE)) + 
+    geom_abline() + 
+    ggtitle("This makes a significant difference in predicting post-drought Rs")
 
 ```
 
