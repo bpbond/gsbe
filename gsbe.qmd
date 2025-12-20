@@ -33,9 +33,9 @@ message("After filtering, ", nrow(dat_filtered), " rows of data")
 
 ```
 
-## Independent variable distribution
+## *Independent variable distribution*
 
-We have three potential independent variables – `Rs_annual` (annual soil respiration), `Rh_annual` (annual heterotrophic respiration), and `Rs_growingseason` (mean growing season soil respiration) – and their distributions are non-normal.
+*We have three potential independent variables – `Rs_annual` (annual soil respiration), `Rh_annual` (annual heterotrophic respiration), and `Rs_growingseason` (mean growing season soil respiration) – and their distributions are non-normal.*
 
 ```{r}
 #| fig-width: 10
@@ -61,9 +61,9 @@ dat_filtered %>%
 
 ```
 
-We have a transformation winner: `sqrt()`!
+*We have a transformation winner: `sqrt()`!*
 
-## Dataset overview
+## *Dataset overview*
 
 ```{r read-data}
 #| fig-width: 10
@@ -96,7 +96,7 @@ dat_filtered %>%
 
 ```
 
-## Test Random Forest model
+## *Test Random Forest model*
 
 ```{r test-rf}
 
@@ -105,6 +105,7 @@ library(ranger)
 fit_and_test_rf <- function(x_train, x_val) {
     f <- as.formula(paste(colnames(x_train)[1], "~ ."))
     rf <- ranger::ranger(formula = f, data = x_train, importance = "impurity")
+    # use importance = "permutation" for importance_pvalues()
     
     preds <- predict(rf, data = x_val)$predictions
     obs <- pull(x_val[1])
@@ -113,15 +114,38 @@ fit_and_test_rf <- function(x_train, x_val) {
 
     return(list(model = rf,
                 training_r2 = rf$r.squared, 
-                vars = importance(rf), 
+                importance = importance(rf), 
                 validation_r2 = 1 - rss / tss))
 } # fit random forest model
 
 dat_filtered %>% 
-    select(Rs_annual, 
+    select(sqrt_Rs_annual, Longitude, Latitude,
            Ecosystem_type, SPEI12, #MODIS_NPP, MODIS_GPP,
            Tair:LAI_high, Soil_type_name) %>% 
     filter(complete.cases(.)) -> test
+
+
+# ======================== Testing spatial RF
+# This needs the newest version 1.1.5, not yet on CRAN
+# remotes::install_github(
+#   repo = "blasbenito/spatialRF",
+#   ref = "main",
+#   force = TRUE,
+#   quiet = TRUE
+#   )
+
+dm <- geodist::geodist(select(test, Longitude, Latitude), measure = "geodesic")
+test$Longitude <- test$Latitude <- NULL
+
+rf_sp <- spatialRF::rf(data = test, 
+                       dependent.variable.name = colnames(test)[1],
+                       predictor.variable.names = setdiff(colnames(test), colnames(test)[1]),
+                       distance.matrix = dm,
+                       distance.thresholds = 0)
+print(rf_sp)
+# ======================== Testing spatial RF
+
+
 
 message("The test complete-cases dataset has ", dim(test)[1], " rows and ", dim(test)[2], " columns")
 set.seed(123)
@@ -133,9 +157,14 @@ message("The test validation dataset has ", dim(test_val)[1], " rows and ", dim(
 
 test_out <- fit_and_test_rf(x_train = test_train, x_val = test_val)
 print(test_out)
+imp <- tibble(vars = names(test_out$importance), vals = test_out$importance)
+
+#library(vivid)
+# This doesn't work with character predictors though
+#pdpVars(test, rf, "Rs_annual")
 ```
 
-## Analysis1
+## *Analysis1*
 
 ```{r}
 #| eval: false
@@ -238,6 +267,12 @@ do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs, 
     bind_rows(results)
 }
 
+out <- do_full_analysis(dat_filtered,
+                        iv_set, predictors,
+                        spei_windows = c(12,24),
+                        spei_cutoffs = spei_cutoffs,
+                        k = 3)
+
 
 # rescale predictors
 # complete.cases
@@ -269,7 +304,7 @@ library(car)
 car::Anova(m_reduced, type = "III")
 ```
 
-## Reproducibility
+## *Reproducibility*
 
 ```{r}
 #| echo: false
