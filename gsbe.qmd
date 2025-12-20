@@ -1,5 +1,5 @@
 ---
-title: "gsbe-data"
+title: "gsbe"
 author: "bbl"
 format:
   html:
@@ -33,9 +33,9 @@ message("After filtering, ", nrow(dat_filtered), " rows of data")
 
 ```
 
-## *Independent variable distribution*
+## Independent variable distribution
 
-*We have three potential independent variables – `Rs_annual` (annual soil respiration), `Rh_annual` (annual heterotrophic respiration), and `Rs_growingseason` (mean growing season soil respiration) – and their distributions are non-normal.*
+We have three potential independent variables – `Rs_annual` (annual soil respiration), `Rh_annual` (annual heterotrophic respiration), and `Rs_growingseason` (mean growing season soil respiration) – and their distributions are non-normal.
 
 ```{r}
 #| fig-width: 10
@@ -61,9 +61,9 @@ dat_filtered %>%
 
 ```
 
-*We have a transformation winner: `sqrt()`!*
+We have a transformation winner: `sqrt()`!
 
-## *Dataset overview*
+## Dataset overview
 
 ```{r read-data}
 #| fig-width: 10
@@ -96,9 +96,15 @@ dat_filtered %>%
 
 ```
 
-## *Test Random Forest model*
+## Test Random Forest model
+
+We are using the `ranger` package.
+
+Wright, M. N. and Ziegler, A.: Ranger: A fast implementation of random forests for high dimensional data in C++ and R, J. Stat. Softw., 77, https://doi.org/10.18637/jss.v077.i01, 2017.
 
 ```{r test-rf}
+#| fig-width: 10
+#| fig-height: 6
 
 # Fit random forest model; i.v. in first column
 library(ranger)
@@ -119,52 +125,60 @@ fit_and_test_rf <- function(x_train, x_val) {
 } # fit random forest model
 
 dat_filtered %>% 
+    select(sqrt_Rs_annual, #Longitude, Latitude,
+           Ecosystem_type, SPEI12, #MODIS_NPP, MODIS_GPP,
+           Tair:LAI_high, Soil_type_name) %>% 
+    # vivid::pdpVars() below needs things as factors not char
+    mutate(Ecosystem_type = as.factor(Ecosystem_type),
+           Soil_type_name = as.factor(Soil_type_name)) %>% 
+    filter(complete.cases(.)) -> 
+    test
+
+message("The test complete-cases dataset has ", dim(test)[1],
+        " rows and ", dim(test)[2], " columns")
+message("Fitting all-data model")
+rf_all_data <- ranger(sqrt_Rs_annual ~ ., data = test, importance = "impurity")
+print(rf_all_data)
+
+library(vivid)
+# This doesn't work with character predictors though
+pdpVars(data = test, 
+        fit = rf_all_data, 
+        response = "sqrt_Rs_annual",
+        vars = c("Tair", "Precip", "Tsoil_lev1", "LAI_high"))
+```
+
+## Test spatial Random Forest
+
+Spatial autocorrelation wouldn't change the fit of the model, but it could bias the variable importance metrics. Evaluate.
+
+```{r spatial-rf}
+
+# This needs the newest version 1.1.5, not yet on CRAN
+# remotes::install_github(repo = "blasbenito/spatialRF",
+#   ref = "main", force = TRUE, quiet = TRUE)
+stopifnot(packageVersion("spatialRF") >= "1.1.5")
+
+dat_filtered %>% 
     select(sqrt_Rs_annual, Longitude, Latitude,
            Ecosystem_type, SPEI12, #MODIS_NPP, MODIS_GPP,
            Tair:LAI_high, Soil_type_name) %>% 
-    filter(complete.cases(.)) -> test
+    filter(complete.cases(.)) -> 
+    test
 
-
-# ======================== Testing spatial RF
-# This needs the newest version 1.1.5, not yet on CRAN
-# remotes::install_github(
-#   repo = "blasbenito/spatialRF",
-#   ref = "main",
-#   force = TRUE,
-#   quiet = TRUE
-#   )
-
-dm <- geodist::geodist(select(test, Longitude, Latitude), measure = "geodesic")
+# Compute distance between all pairs of points
+library(geodist)
+dm <- geodist(select(test, Longitude, Latitude), measure = "geodesic")
 test$Longitude <- test$Latitude <- NULL
 
+library(spatialRF)
 rf_sp <- spatialRF::rf(data = test, 
                        dependent.variable.name = colnames(test)[1],
                        predictor.variable.names = setdiff(colnames(test), colnames(test)[1]),
-                       distance.matrix = dm,
-                       distance.thresholds = 0)
-print(rf_sp)
-# ======================== Testing spatial RF
-
-
-
-message("The test complete-cases dataset has ", dim(test)[1], " rows and ", dim(test)[2], " columns")
-set.seed(123)
-groups <- sample.int(n = 10, size = nrow(test), replace = TRUE)
-test_train <- test[groups != 1,]
-test_val <- test[groups == 1,]
-message("The test training dataset has ", dim(test_train)[1], " rows and ", dim(test_train)[2], " columns")
-message("The test validation dataset has ", dim(test_val)[1], " rows and ", dim(test_val)[2], " columns")
-
-test_out <- fit_and_test_rf(x_train = test_train, x_val = test_val)
-print(test_out)
-imp <- tibble(vars = names(test_out$importance), vals = test_out$importance)
-
-#library(vivid)
-# This doesn't work with character predictors though
-#pdpVars(test, rf, "Rs_annual")
+                       distance.matrix = dm)
 ```
 
-## *Analysis1*
+## Analysis1
 
 ```{r}
 #| eval: false
@@ -304,7 +318,7 @@ library(car)
 car::Anova(m_reduced, type = "III")
 ```
 
-## *Reproducibility*
+## Reproducibility
 
 ```{r}
 #| echo: false
