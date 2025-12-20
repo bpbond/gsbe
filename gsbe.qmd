@@ -140,12 +140,19 @@ message("Fitting all-data model")
 rf_all_data <- ranger(sqrt_Rs_annual ~ ., data = test, importance = "impurity")
 print(rf_all_data)
 
+imps <- sort(rf_all_data$variable.importance, decreasing = TRUE)
+
 library(vivid)
-# This doesn't work with character predictors though
+# Top three variables...
 pdpVars(data = test, 
         fit = rf_all_data, 
         response = "sqrt_Rs_annual",
-        vars = c("Tair", "Precip", "Tsoil_lev1", "LAI_high"))
+        vars = names(imps)[1:3])
+# ...and the next three
+pdpVars(data = test, 
+        fit = rf_all_data, 
+        response = "sqrt_Rs_annual",
+        vars = names(imps)[4:6])
 ```
 
 ## Test spatial Random Forest
