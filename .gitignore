@@ -52,6 +52,7 @@ rsconnect/
 /data-srdb/*.csv
 /data-spei/*.nc
 /data-ERA5/*.grib
+/data-ERA5/*.parquet
 
 # OS files
 .DS_Store
