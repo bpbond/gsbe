@@ -391,7 +391,7 @@ The vegetation and soil data are also from ERA5 but thankfully they're not time-
 
 # Extract soil data for SRDB points
 soil <- rast("data-ERA5/ERA5_soil_type.grib")
-plot(soil)
+plot(soil, main = "ERA5 soil type")
 soil_dat <- terra::extract(soil, coords)
 names(soil_dat) <- c("ID", "Soil_type_number")
 
@@ -403,11 +403,11 @@ soil_dat <- soil_dat %>% left_join(soil_names, by = "Soil_type_number")
 
 # Extract vegetation data
 tvh <- rast("data-ERA5/ERA5_tvh.grib")
-plot(tvh)
+plot(tvh, main = "ERA5 high vegetation type")
 tvh_dat <- terra::extract(tvh, coords)
-names(tvh_dat) <- c("ID", "Veg_type_high")
+names(tvh_dat) <- c("ID", "Veg_type_hi")
 tvl <- rast("data-ERA5/ERA5_tvl.grib")
-plot(tvl)
+plot(tvl, main = "ERA5 low vegetation type")
 tvl_dat <- terra::extract(tvl, coords)
 names(tvl_dat) <- c("ID", "Veg_type_low")
 
@@ -636,6 +636,34 @@ if(sum(na_data) > 0) {
     message("Removing ", sum(na_data), " rows with no climate/SPEI data")
     srdb_sample <- srdb_sample[!na_data,]
 }
+
+srdb_sample %>% 
+    select(Biome, Ecosystem_type, Rs_annual, Rh_annual, Rs_growingseason,
+           Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high, 
+           MODIS_NPP, MODIS_GPP) %>% 
+    pivot_longer(Tair:MODIS_GPP, names_to = "covariate_name", values_to = "covariate_value") %>%
+    pivot_longer(Rs_annual:Rs_growingseason) %>% 
+    ggplot(aes(value, covariate_value, color = Biome)) + 
+        facet_grid(covariate_name ~ name, scales = "free") +
+        geom_point(na.rm = TRUE)
+
+srdb_sample %>% 
+    filter(!Biome == "Semi-arid", !Biome == "Unknown") %>% 
+    select(Biome, Ecosystem_type, Rs_annual, 
+           Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high) %>% 
+    pivot_longer(Tair:LAI_high, names_to = "covariate_name", values_to = "covariate_value") %>% 
+    ggplot(aes(Rs_annual, covariate_value, color = Biome)) + 
+        facet_grid(covariate_name ~ Biome, scales = "free") +
+        geom_point(na.rm = TRUE)
+ 
+stn <- as.factor(srdb_sample$Soil_type_number)
+nst <- length(unique(stn))
+srdb_sample %>% 
+    filter(Rs_annual > 0) %>% 
+    transmute(`sqrt(Rs_growingseason)` = sqrt(Rs_growingseason),
+              `sqrt(Rs_annual)` = sqrt(Rs_annual), 
+              `sqrt(Rh_annual)` = sqrt(Rh_annual)) %>% 
+    pairs(col = hcl.colors(nst, "Temps")[stn])
 
 OUTFILE <- "srdb_joined_data.csv"
 message("Writing ", OUTFILE)

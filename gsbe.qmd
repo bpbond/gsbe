@@ -85,39 +85,6 @@ dat_filtered %>%
 
 **Conclusion: we have a transformation winner: `sqrt()`!**
 
-## Dataset overview
-
-```{r prep-data}
-#| fig-width: 10
-#| fig-height: 8
-
-dat_filtered %>% 
-    select(Biome, Ecosystem_type, sqrt_Rs_annual, sqrt_Rh_annual, sqrt_Rs_growingseason,
-           Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high, 
-           MODIS_NPP, MODIS_GPP) %>% 
-    pivot_longer(Tair:MODIS_GPP, names_to = "covariate_name", values_to = "covariate_value") %>%
-    pivot_longer(sqrt_Rs_annual:sqrt_Rs_growingseason) %>% 
-    ggplot(aes(value, covariate_value, color = Biome)) + 
-        facet_grid(covariate_name ~ name, scales = "free") +
-        geom_point(na.rm = TRUE)
-
-dat_filtered %>% 
-    filter(!Biome == "Semi-arid", !Biome == "Unknown") %>% 
-    select(Biome, Ecosystem_type, sqrt_Rs_annual, 
-           Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high) %>% 
-    pivot_longer(Tair:LAI_high, names_to = "covariate_name", values_to = "covariate_value") %>% 
-    ggplot(aes(sqrt_Rs_annual, covariate_value, color = Biome)) + 
-        facet_grid(covariate_name ~ Biome, scales = "free") +
-        geom_point(na.rm = TRUE)
- 
-stn <- as.factor(dat_filtered$Soil_type_number)
-nst <- length(unique(stn))
-dat_filtered %>% 
-    select(sqrt_Rs_growingseason, sqrt_Rs_annual, sqrt_Rh_annual) %>% 
-    pairs(col = hcl.colors(nst, "Temps")[stn])
-
-```
-
 ## Test Random Forest model
 
 We are using the `ranger` package.
