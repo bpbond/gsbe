@@ -381,27 +381,39 @@ ggplot(world) +
 
 ```
 
-## Soil type data
+## Vegetation and soil type data
 
-The soil type data are also from ERA5 but thankfully they're not time-varying, so fast and easy to extract.
+The vegetation and soil data are also from ERA5 but thankfully they're not time-varying, so fast and easy to extract.
 
-```{r read-soil-types}
+```{r read-veg-soil-types}
 #| warning: false
 #| fig-width: 12
 
-# Extract for SRDB points
-x <- rast("data-ERA5/ERA5_soil_type.grib")
-plot(x)
-y <- terra::extract(x, coords) # not time-varying, so fast
-names(y) <- c("ID", "Soil_type_number")
+# Extract soil data for SRDB points
+soil <- rast("data-ERA5/ERA5_soil_type.grib")
+plot(soil)
+soil_dat <- terra::extract(soil, coords)
+names(soil_dat) <- c("ID", "Soil_type_number")
 
 # Attach names to numeric codes
-y$Soil_type_number <- as.character(y$Soil_type_number) # for join below
-soil_names <- tibble(strings = strsplit(units(x), "; ")[[1]]) %>% 
+soil_dat$Soil_type_number <- as.character(soil_dat$Soil_type_number) # for join below
+soil_names <- tibble(strings = strsplit(units(soil), "; ")[[1]]) %>% 
     separate(strings, into = c("Soil_type_number", "Soil_type_name"), convert = TRUE, sep = "=")
-y <- y %>% left_join(soil_names, by = "Soil_type_number")
+soil_dat <- soil_dat %>% left_join(soil_names, by = "Soil_type_number")
 
-srdb_sample <- bind_cols(srdb_sample, y[-1])
+# Extract vegetation data
+tvh <- rast("data-ERA5/ERA5_tvh.grib")
+plot(tvh)
+tvh_dat <- terra::extract(tvh, coords)
+names(tvh_dat) <- c("ID", "Veg_type_high")
+tvl <- rast("data-ERA5/ERA5_tvl.grib")
+plot(tvl)
+tvl_dat <- terra::extract(tvl, coords)
+names(tvl_dat) <- c("ID", "Veg_type_low")
+
+#lcc <- read_csv("data-ERA5/ECMWF_land_cover_codes.csv", col_types = "cc")
+
+srdb_sample <- bind_cols(srdb_sample, soil_dat[-1], tvh_dat[-1], tvl_dat[-1])
 ```
 
 ## MODIS annual NPP
@@ -611,7 +623,7 @@ srdb_sample %>%
     srdb_predictors
 
 ggplot(srdb_predictors, aes(Year, name)) + 
-    geom_bin2d() + 
+    geom_bin2d(bins = 15) + 
     facet_grid(Type ~., scales = "free_y", space = "free_y") +
     ggtitle("Availability of independent variables and potential predictors over time")
 
