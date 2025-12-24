@@ -10,6 +10,8 @@ library(arrow)
 library(dplyr)
 library(tidyr)
 
+# ========= ERA5 data
+
 message("Transforming ERA5 grib data to data frames for model prediction...")
 for(yr in 1985:2024) {
     message("\t", yr)
@@ -17,6 +19,7 @@ for(yr in 1985:2024) {
     y <- as.matrix(x)
 
     # This is returned as 6483600 (=grid cells) rows * 84 (=7 variables * 12 months) columns
+    # (but we are resampling to 0.25 degrees, same as SPEI data = 1038240)
     nvars <- ncol(y) / 12
     stopifnot(nvars %% 1 == 0) # should be cleanly divisible by 12
 
@@ -35,7 +38,15 @@ for(yr in 1985:2024) {
     write_parquet(out, paste0("data-ERA5/ERA5_", yr, ".parquet")) # 66 MB
 }
 
+# ========= Land cover ERA5 data
+
+# TODO
+
+# ========= SPEI data
+
 message("Assembling SPEI data...")
+
+ERA5_raster <- rast("data-ERA5/ERA5_1985.grib")
 
 load_spei <- function(window, year) {
     message("\tLoad ", window, " ", year)
@@ -45,7 +56,11 @@ load_spei <- function(window, year) {
     stopifnot(length(files) == 12)
 
     suppressWarnings({
-        dat <- lapply(files, function(f) as.matrix(terra::rast(f)))
+        dat <- lapply(files, function(f) {
+            x <- terra::rast(f)
+            # Resample to the ERA5 0.1x0.1 grid
+            as.matrix(resample(x, ERA5_raster))
+        })
     })
     suppressMessages({
         dat <- dplyr::bind_cols(dat, .name_repair = "unique")
@@ -69,7 +84,6 @@ for(yr in 1985:2024) {
 
     spei12_lastyear <- spei12 %>% rename(SPEI12_y1 = SPEI12)
     spei24_lastyear <- load_spei(24, yr) %>% rename(SPEI24_y1 = SPEI24)
-
 }
 
 message("All done!")
