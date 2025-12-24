@@ -7,10 +7,12 @@ nms <- read_csv("ERA5_short_names.csv", col_types = "cc")
 library(tibble)
 library(terra)
 library(arrow)
+library(dplyr)
+library(tidyr)
 
-message("Reading ERA5 grib data and transforming to data frames ready for model prediction...")
+message("Transforming ERA5 grib data to data frames for model prediction...")
 for(yr in 1985:2024) {
-    message(yr)
+    message("\t", yr)
     x <- rast(paste0("data-ERA5/ERA5_", yr, ".grib"))
     y <- as.matrix(x)
 
@@ -31,6 +33,43 @@ for(yr in 1985:2024) {
     # out$area <- as.matrix(cellSize(x))[,1]
 
     write_parquet(out, paste0("data-ERA5/ERA5_", yr, ".parquet")) # 66 MB
+}
+
+message("Assembling SPEI data...")
+
+load_spei <- function(window, year) {
+    message("\tLoad ", window, " ", year)
+    files <- list.files("data-spei/",
+                        pattern = paste0("SPEI", window, ".*", year, "[0-9]{2}.nc$"),
+                        full.names = TRUE)
+    stopifnot(length(files) == 12)
+
+    suppressWarnings({
+        dat <- lapply(files, function(f) as.matrix(terra::rast(f)))
+    })
+    suppressMessages({
+        dat <- dplyr::bind_cols(dat, .name_repair = "unique")
+    })
+    out <- tibble(SPEI = rowMeans(dat))
+    out$SPEI[out$SPEI == -9999] <- NaN
+    names(out)[1] <- paste0("SPEI", window)
+    out
+}
+
+# Need these for the first loop iteration
+spei12_lastyear <- load_spei(12, 1984) %>% rename(SPEI12_y1 = SPEI12)
+spei24_lastyear <- load_spei(24, 1984) %>% rename(SPEI24_y1 = SPEI24)
+
+for(yr in 1985:2024) {
+    message(yr)
+    spei12 <- load_spei(12, yr)
+
+    out <- bind_cols(spei12, spei12_lastyear, spei24_lastyear)
+    arrow::write_parquet(out, paste0("data-spei/spei", yr, ".parquet"))
+
+    spei12_lastyear <- spei12 %>% rename(SPEI12_y1 = SPEI12)
+    spei24_lastyear <- load_spei(24, yr) %>% rename(SPEI24_y1 = SPEI24)
+
 }
 
 message("All done!")

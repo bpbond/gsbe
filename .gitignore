@@ -51,6 +51,7 @@ rsconnect/
 # Data
 /data-srdb/*.csv
 /data-spei/*.nc
+/data-spei/*.parquet
 /data-ERA5/*.grib
 /data-ERA5/*.parquet
 
