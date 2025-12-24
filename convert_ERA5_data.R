@@ -38,9 +38,12 @@ for(yr in 1985:2024) {
     write_parquet(out, paste0("data-ERA5/ERA5_", yr, ".parquet")) # 66 MB
 }
 
-# ========= Land cover ERA5 data
+# ========= Soil and vegetation ERA5 data
 
-# TODO
+lc <- rast("data-ERA5/ERA5_soil_type.grib") %>% as_tibble()
+names(lc)[1] <- "Soil_type_number"
+write_parquet(lc, "data-ERA5/ERA5_soil_type.parquet")
+
 
 # ========= SPEI data
 
