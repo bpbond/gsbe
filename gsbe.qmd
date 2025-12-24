@@ -34,10 +34,10 @@ dat %>%
     filter(is.na(Rs_growingseason) | (Rs_growingseason > 0 & Rs_growingseason < 20)) %>% 
     filter(is.na(Rs_annual) | (Rs_annual > 0 & Rs_annual < 4000)) %>% 
     filter(is.na(Rh_annual) | (Rh_annual > 0 & Rh_annual < 2000)) %>% 
-    # most SRDB records are from forests (~3000), then grasslands (~760), ag (~540),
-    # shrubland (~230), wetland (~210), and desert (~80). Add the next one, 
-    # savanna (~30), because it might be particularly vulnerable to a Birch effect, 
-    # but group everything else into "Other"
+    # most SRDB records are from forests (~3000), then grasslands (~760), 
+    # ag (~540), shrubland (~230), wetland (~210), and desert (~80). We add
+    # the next one, savanna (~30), because it might be particularly 
+    # vulnerable to a Birch effect, but group everything else into "Other"
     mutate(Ecosystem_type = if_else(Ecosystem_type %in% c("Agriculture", "Desert",
                                                           "Forest", "Grassland",
                                                           "Savanna", "Shrubland", "Wetland"),
@@ -87,7 +87,7 @@ dat_filtered %>%
 
 **Conclusion: we have a transformation winner: `sqrt()`!**
 
-## Test Random Forest model: performance
+## Random Forest model: performance
 
 We are using the `ranger` package.
 
@@ -352,7 +352,7 @@ out_smry %>%
 
 ```
 
-## Test linear model: post-drought PBE effect
+## Linear model: post-drought PBE effect
 
 ```{r test-linear}
 #| fig-width: 10
