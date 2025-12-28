@@ -307,34 +307,6 @@ PBE_interactions %>%
     pivot_wider(values_from = effect, names_from = model, values_fill = "") %>% 
     knitr::kable(caption = "PBE: significant effect directions")
 
-# d
-rows <- 20
-meandata <- as_tibble(t(as.data.frame(colMeans(dat_linear[sapply(dat_linear, is.numeric)]))))
-meandata <- meandata[rep(1, rows),]
-meandata$PBE <- c(rep(FALSE, rows / 2), rep(TRUE, rows / 2))
-
-varimpdata <- list()
-for(var in c("Tair", "Tsoil_lev1", "Tsoil_lev2",
-             "Precip", "VWC_lev1", "VWC_lev2")) {
-    this_meandata <- meandata
-    meanval <- colMeans(this_meandata[,var])
-    this_meandata[var] <- rep(seq(meanval * 0.9, 
-                                  meanval * 1.1, 
-                                  length.out = rows / 2), 2)
-    varimpdata[[var]] <- tibble(var = var,
-                                value = pull(this_meandata[var]),
-                                PBE = this_meandata$PBE,
-                         sqrt_Rs_annual = predict(m_Rs_reduced, 
-                                                  newdata = this_meandata))
-}
-
-bind_rows(varimpdata) %>% 
-    mutate(var = factor(var, levels = c("Tair", "Tsoil_lev1", "Tsoil_lev2", 
-                                        "Precip", "VWC_lev1", "VWC_lev2"))) %>% 
-    ggplot(aes(value, sqrt_Rs_annual, color = PBE)) +
-    geom_line() +
-    facet_wrap(~var, scales = "free")
-
 ```
 
 **Conclusions:**
