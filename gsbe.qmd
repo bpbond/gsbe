@@ -363,7 +363,7 @@ out_ranked %>%
 
 -   **Precip and Tair are uniformly important; LAI and soil temp/VWC medium importance; PBE (drought effect from previous year) not important**
 
-## Linear model results
+## Linear model: PBE importance and interactions
 
 ```{r test-linear}
 #| fig-width: 10
@@ -371,30 +371,19 @@ out_ranked %>%
 
 dat_filtered %>% 
     mutate(PBE = SPEI12_y1 <= -1 & SPEI12 > 0) %>% 
-    select(sqrt_Rs_annual, sqrt_Rs_growingseason, sqrt_Rh_annual,
+    select(sqrt_Rs_annual, 
            Ecosystem_type, SPEI12, PBE, 
-           Tair:LAI_high, Soil_type_name) ->
-    dat_linear_base
-
-dat_linear_base %>%
-    select(-sqrt_Rs_growingseason, -sqrt_Rh_annual) %>% 
-    filter(complete.cases(.)) -> 
-    dat_linear
-
-dat_linear_base %>%
-    select(-sqrt_Rs_annual, -sqrt_Rh_annual) %>% 
-    filter(complete.cases(.)) -> 
-    dat_linear_gs
-
-dat_linear_base %>% 
-    select(-sqrt_Rs_annual, -sqrt_Rs_growingseason) %>% 
+           Tair, Tsoil_lev1, Tsoil_lev2,
+           Precip, VWC_lev1, VWC_lev2, 
+           Veg_type_hi, Veg_type_low, LAI_high, 
+           Soil_type_name) %>% 
     filter(complete.cases(.)) ->
-    dat_linear_rh
+    dat_linear
 
 message("Fitting Rs_annual linear model with PBE (SPEI12, -1.0) effect...")
 m_Rs <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
             VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * PBE +
-            Ecosystem_type,
+            Ecosystem_type + LAI_high + Veg_type_hi + Veg_type_low + Soil_type_name,
         data = dat_linear)
 m_Rs_reduced <- MASS::stepAIC(m_Rs, trace = FALSE)
 summary(m_Rs_reduced)
@@ -404,32 +393,10 @@ plot(m_Rs_reduced)
 library(car)
 car::Anova(m_Rs_reduced, type = "III")
 
-message("Fitting Rs_growingseason linear model with PBE (SPEI12, -1.0) effect...")
-m_Rs_growingseason <- lm(sqrt_Rs_growingseason ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
-            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * PBE +
-            Ecosystem_type,
-        data = dat_linear_gs)
-m_Rs_growingseason_reduced <- MASS::stepAIC(m_Rs_growingseason, trace = FALSE)
-summary(m_Rs_growingseason_reduced)
-par(mfrow = c(2, 2))
-plot(m_Rs_growingseason_reduced)
-car::Anova(m_Rs_growingseason_reduced, type = "III")
-
-message("Fitting Rh_annual linear model with PBE (SPEI12, -1.0) effect...")
-m_Rh <- lm(sqrt_Rh_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
-            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * PBE +
-            Ecosystem_type,
-        data = dat_linear_rh)
-m_Rh_reduced <- MASS::stepAIC(m_Rh, trace = FALSE)
-summary(m_Rh_reduced)
-par(mfrow = c(2, 2))
-plot(m_Rh_reduced)
-car::Anova(m_Rh_reduced, type = "III")
-
 message("Fitting Rs_annual linear model without PBE effect...")
 m_Rs_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
             VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) +
-            Ecosystem_type,
+            Ecosystem_type + LAI_high + Veg_type_hi + Veg_type_low + Soil_type_name,
         data = dat_linear)
 
 tibble(model_with_PBE = predict(m_Rs),
@@ -444,14 +411,13 @@ tibble(model_with_PBE = predict(m_Rs),
 
 message("Interactive PBE effects:")
 library(broom)
-m_Rs_reduced_tidy <- tidy(m_Rs_reduced) %>% mutate(model = "Rs_annual")
-m_Rs_growingseason_reduced_tidy <- tidy(m_Rs_growingseason_reduced) %>% mutate(model = "Rs_growingseason")
-m_Rh_reduced_tidy <- tidy(m_Rh_reduced) %>% mutate(model = "Rh_annual")
-bind_rows(m_Rs_reduced_tidy, m_Rs_growingseason_reduced_tidy, m_Rh_reduced_tidy) %>% 
+tidy(m_Rs_reduced) %>% 
+    mutate(model = "Rs_annual") %>% 
     filter(grepl("PBE", term)) %>% 
     separate(term, into = c("interaction", "PBE"), fill = "left", sep = ":") %>% 
     replace_na(list(interaction = "(none)")) %>% 
-    select(model, interaction, estimate, p.value) ->
+    select(model, interaction, estimate, p.value) %>% 
+    mutate(estimate = round(estimate, 4), p.value = round(p.value, 4)) ->
     PBE_interactions
 
 DT::datatable(PBE_interactions)
