@@ -97,23 +97,29 @@ Wright, M. N. and Ziegler, A.: Ranger: A fast implementation of random forests f
 #| fig-width: 10
 #| fig-height: 6
 
-# Fit random forest model; i.v. in first column
+# Fit random forest model and test against validation data
+# The i.v. is in the first column
 library(ranger)
 fit_and_test_rf <- function(x_train, x_val) {
     f <- as.formula(paste(colnames(x_train)[1], "~ ."))
     rf <- ranger::ranger(formula = f, data = x_train, importance = "impurity")
     # use importance = "permutation" for importance_pvalues()
     
-    preds <- predict(rf, data = x_val)$predictions
-    obs <- pull(x_val[1])
-    rss <- sum((preds - obs) ^ 2)
-    tss <- sum((obs - mean(obs)) ^ 2)
+    if(!is.null(x_val)) {
+        preds <- predict(rf, data = x_val)$predictions
+        obs <- pull(x_val[1])
+        rss <- sum((preds - obs) ^ 2)
+        tss <- sum((obs - mean(obs)) ^ 2)
+        validation_r2 <- 1 - rss / tss
+    } else {
+        validation_r2 <- NA_real_
+    }
 
     return(list(model = rf,
                 training_r2 = rf$r.squared, 
                 importance = importance(rf), 
-                validation_r2 = 1 - rss / tss))
-} # fit random forest model
+                validation_r2 = validation_r2))
+}
 
 dat_filtered %>% 
     # vivid::pdpVars() below needs things as factors not char
@@ -121,8 +127,11 @@ dat_filtered %>%
            Soil_type_name = as.factor(Soil_type_name),
            PBE = SPEI12_y1 <= -1 & SPEI12 > 0) %>% 
     select(sqrt_Rs_annual, #Longitude, Latitude,
-           Ecosystem_type, SPEI12, PBE, 
-           Tair:LAI_high, Soil_type_name) %>% 
+           SPEI12, PBE, 
+           Tair, Tsoil_lev1, Tsoil_lev2,
+           Precip, VWC_lev1, VWC_lev2, 
+           LAI_high, Ecosystem_type,
+           Veg_type_hi, Veg_type_low, Soil_type_name) %>% 
     filter(complete.cases(.)) -> 
     test
 
@@ -223,43 +232,9 @@ rf_sp <- spatialRF::rf(data = test,
 
 **Conclusion: no strong evidence of spatial autocorrelation.**
 
-## Analysis1
+## PBE importance analysis
 
 ```{r analysis1}
-#| eval: true
-
-
-fit_lm <- function(x) {} # fit linear model; i.v. in first column
-
-do_k_fold <- function(x, k = 10) {
-    if(!all(complete.cases(x))) {
-        stop("x should not have any NAs at this stage!")
-    }
-    
-    set.seed(123)
-    groups <- sample.int(n = k, size = nrow(x), replace = TRUE)
-    training_r2 <- rep.int(NA_real_, k)
-    validation_r2 <- rep.int(NA_real_, k)
-    for(i in seq_len(k)) {
-        x_val <- x[groups == i,]
-        x_train <- x[groups != i,]
-        # message("\tk-fold ", i, ":")
-        # message("\t\tTraining is ", nrow(x_train), " x ", ncol(x_train))
-        # message("\t\tValidation is ", nrow(x_val), " x ", ncol(x_val))
-
-        rf_out <- fit_and_test_rf(x_train = x_train, x_val = x_val)
-        training_r2[i] <- rf_out$training_r2
-        validation_r2[i] <- rf_out$validation_r2
-        
-        # message("\t\tTraining R2 = ", round(training_r2[i], 3))
-        # message("\t\tValidation R2 = ", round(validation_r2[i], 3))
-    }
-    tibble(k = seq_len(k), 
-           training_r2 = training_r2,
-           validation_r2 = validation_r2)
-} # compute fit statistics using k-fold
-
-
 
 # These are the three most common fluxes recorded in SRDB
 #iv_set <- c("Rs_annual")#, "Rh_annual", "Rs_growingseason")
@@ -279,9 +254,10 @@ predictors <- c("Ecosystem_type",
                 "SPEI12",
                 "Tair", "Precip",
                 "Tsoil_lev1", "Tsoil_lev2", "VWC_lev1", "VWC_lev2", 
+                "Veg_type_hi", "Veg_type_low", 
                 "LAI_high", "Soil_type_name")
 
-do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs, k = 10) {
+do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs) {
     results <- list()
     SPEI_cols <- colnames(x)[grep("^SPEI", colnames(x))]
     for(iv in iv_set) {
@@ -309,12 +285,18 @@ do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs, 
                 # Drop non-predictors entirely now
                 this_x <- this_x[c(iv, predictors, "PBE")]
                 
-                # Run the k-fold and save results
-                k_fold_out <- do_k_fold(this_x, k = k)
-                k_fold_out$spei_window = w
-                k_fold_out$spei_cut <- spei_cut
-                k_fold_out$iv = iv
-                results[[paste(iv, w, spei_cut)]] <- k_fold_out
+                # Fit models and save results
+                rf_out <- fit_and_test_rf(this_x, NULL)
+                rf_results <- tibble(spei_window = w,
+                                     spei_cut = spei_cut,
+                                     iv = iv,
+                                     predictor = names(rf_out$importance),
+                                     n = nrow(this_x),
+                                     pbe_n = sum(this_x$PBE),
+                                     importance = rf_out$importance,
+                                     training_r2 = rf_out$training_r2)
+ 
+                results[[paste(iv, w, spei_cut)]] <- rf_results
             }
         }
     }
@@ -324,35 +306,64 @@ do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs, 
 out <- do_full_analysis(dat_filtered,
                         iv_set, predictors,
                         spei_windows = c(12,24),
-                        spei_cutoffs = spei_cutoffs,
-                        k = 10)
+                        spei_cutoffs = spei_cutoffs)
+
+```
+
+## Random Forest results
+
+```{r rf-results}
 
 # Compute means across the k-folds
 out %>% 
-    group_by(spei_window, spei_cut, iv) %>% 
-    summarise(training_r2 = mean(training_r2), 
-              validation_r2 = mean(validation_r2)) %>% 
+    group_by(spei_window, spei_cut, iv, n, pbe_n) %>% 
+    summarise(r2 = round(mean(training_r2), 3), .groups = "drop") %>% 
     mutate(spei_cut = as.factor(spei_cut),
            spei_window = paste(spei_window, "months")) ->
     out_smry
 
-ggplot(out_smry, aes(spei_cut, iv, fill = validation_r2)) + 
+# Table: Training R2 values
+out_smry %>%
+    select(spei_window, spei_cut, iv, r2) %>% 
+    pivot_wider(names_from = "iv", values_from = "r2") %>% 
+    knitr::kable(caption = "RF training (OOB) R2")
+
+# Table: number (and % of total) of TRUE PBE entries; how big are the datasets?
+out_smry %>%
+    mutate(pbe_n = paste0(pbe_n, " (", round(pbe_n / n * 100, 0), "%)")) %>% 
+    select(spei_window, spei_cut, iv, pbe_n) %>% 
+    pivot_wider(names_from = "iv", values_from = "pbe_n") %>% 
+    knitr::kable(caption = "RF training PBE_N", align = "r")
+
+# Table: rank of PBE variable
+out %>% 
+    group_by(spei_window, spei_cut, iv) %>% 
+    mutate(rank = min_rank(desc(importance))) ->
+    out_ranked
+
+out_ranked %>% 
+    filter(predictor == "PBE") %>% 
+    select(spei_window, spei_cut, iv, rank) %>% 
+    pivot_wider(names_from = "iv", values_from = "rank") %>%
+    knitr::kable(caption = "Rank of PBE variable in RF model")
+
+out_ranked %>% 
+    group_by(iv, predictor) %>% summarise(rank = mean(rank)) %>% 
+    ggplot(aes(iv, predictor, fill = rank)) + 
     geom_tile() + 
-    facet_wrap(~spei_window) +
-    xlab("Previous-year SPEI cutoff") + ylab("")
-
-out_smry %>% 
-    filter(spei_window == "12 months") %>% 
-    pivot_longer(cols = c(training_r2, validation_r2)) %>% 
-    ggplot(aes(spei_cut, iv, fill = value)) +
-    geom_tile() +
-    facet_wrap(~name) +
-    xlab("Previous-year SPEI cutoff") + ylab("") +
-    ggtitle("12-month SPEI window")
-
+    xlab("Independent variable") +
+    ggtitle("Predictor ranks in RF model")
 ```
 
-## Linear model: post-drought PBE effect
+**Conclusions:**
+
+-   **The values used for SPEI window (12/24 months) and drought level (0, -1, -1.5) don't make much difference.**
+
+-   **RF model explains 52-65% of OOB variability**
+
+-   **Precip and Tair are uniformly important; LAI and soil temp/VWC medium importance; PBE (drought effect from previous year) not important**
+
+## Linear model results
 
 ```{r test-linear}
 #| fig-width: 10
