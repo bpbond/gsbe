@@ -232,7 +232,115 @@ rf_sp <- spatialRF::rf(data = test,
 
 **Conclusion: no strong evidence of spatial autocorrelation.**
 
-## PBE importance analysis
+## Linear model: PBE importance and interactions
+
+```{r test-linear}
+#| fig-width: 10
+#| fig-height: 6
+
+dat_filtered %>% 
+    mutate(PBE = SPEI12_y1 <= -1 & SPEI12 > 0,
+           Ecosystem_type_number = as.numeric(Ecosystem_type)) %>% 
+    select(sqrt_Rs_annual, 
+           Ecosystem_type, Ecosystem_type_number, 
+           SPEI12, PBE, 
+           Tair, Tsoil_lev1, Tsoil_lev2,
+           Precip, VWC_lev1, VWC_lev2, 
+           Veg_type_hi, Veg_type_low, LAI_high, 
+           Soil_type_number) %>% 
+    filter(complete.cases(.)) ->
+    dat_linear
+
+message("Fitting Rs_annual linear model with PBE (SPEI12, -1.0) effect...")
+m_Rs <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
+            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * PBE +
+            Ecosystem_type_number + LAI_high + Veg_type_hi + Veg_type_low + Soil_type_number,
+        data = dat_linear)
+m_Rs_reduced <- MASS::stepAIC(m_Rs, trace = FALSE)
+summary(m_Rs_reduced)
+par(mfrow = c(2, 2))
+plot(m_Rs_reduced)
+
+library(car)
+car::Anova(m_Rs_reduced, type = "III")
+
+message("Fitting Rs_annual linear model without PBE effect...")
+m_Rs_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
+            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) +
+            Ecosystem_type_number + LAI_high + Veg_type_hi + Veg_type_low + Soil_type_number,
+        data = dat_linear)
+
+tibble(model_with_PBE = predict(m_Rs),
+       model_without_PBE = predict(m_Rs_no_PBE),
+       PBE = dat_linear$PBE, 
+       Ecosystem_type = dat_linear$Ecosystem_type) %>% 
+    ggplot(aes(model_without_PBE, model_with_PBE)) + 
+    geom_point(aes(color = PBE)) + 
+    geom_abline() + 
+    facet_wrap(~Ecosystem_type) +
+    ggtitle("Linear model: effect of including PBE on sqrt_Rs_annual")
+
+message("Interactive PBE effects:")
+library(broom)
+tidy(m_Rs_reduced) %>% 
+    mutate(model = "Rs_annual") %>% 
+    filter(grepl("PBE", term)) %>% 
+    separate(term, into = c("interaction", "PBE"), fill = "left", sep = ":") %>% 
+    replace_na(list(interaction = "(none)")) %>% 
+    select(model, interaction, estimate, p.value) %>% 
+    mutate(estimate = round(estimate, 4), p.value = round(p.value, 4)) ->
+    PBE_interactions
+
+DT::datatable(PBE_interactions)
+
+# Summary table of significant effect directions
+PBE_interactions %>% 
+    mutate(signif = p.value < 0.05, 
+           effect = case_when(signif & estimate < 0 ~ "Positive",
+                              signif & estimate >= 0 ~ "Negative",
+                              .default = "")) %>% 
+    select(model, interaction, effect) %>%
+    pivot_wider(values_from = effect, names_from = model, values_fill = "") %>% 
+    knitr::kable(caption = "PBE: significant effect directions")
+
+# d
+rows <- 20
+meandata <- as_tibble(t(as.data.frame(colMeans(dat_linear[sapply(dat_linear, is.numeric)]))))
+meandata <- meandata[rep(1, rows),]
+meandata$PBE <- c(rep(FALSE, rows / 2), rep(TRUE, rows / 2))
+
+varimpdata <- list()
+for(var in c("Tair", "Tsoil_lev1", "Tsoil_lev2",
+             "Precip", "VWC_lev1", "VWC_lev2")) {
+    this_meandata <- meandata
+    meanval <- colMeans(this_meandata[,var])
+    this_meandata[var] <- rep(seq(meanval * 0.9, 
+                                  meanval * 1.1, 
+                                  length.out = rows / 2), 2)
+    varimpdata[[var]] <- tibble(var = var,
+                                value = pull(this_meandata[var]),
+                                PBE = this_meandata$PBE,
+                         sqrt_Rs_annual = predict(m_Rs_reduced, 
+                                                  newdata = this_meandata))
+}
+
+bind_rows(varimpdata) %>% 
+    mutate(var = factor(var, levels = c("Tair", "Tsoil_lev1", "Tsoil_lev2", 
+                                        "Precip", "VWC_lev1", "VWC_lev2"))) %>% 
+    ggplot(aes(value, sqrt_Rs_annual, color = PBE)) +
+    geom_line() +
+    facet_wrap(~var, scales = "free")
+
+```
+
+**Conclusions:**
+
+-   **PBE (potential Birch effect, i.e. having a strong drought the year before a well-watered year) has a strong statistical effect on the temperature and moisture drivers of soil respiration.**
+
+-   **But, it's inconsistent—there's no clean 'Birch effect.'\
+    **
+
+## PBE sensitivity test
 
 ```{r analysis1}
 
@@ -308,19 +416,20 @@ out <- do_full_analysis(dat_filtered,
                         spei_windows = c(12,24),
                         spei_cutoffs = spei_cutoffs)
 
-```
-
-## Random Forest results
-
-```{r rf-results}
-
-# Compute means across the k-folds
+# Compute means across the SPEI windows, drought definitions, and i.v.'s
 out %>% 
     group_by(spei_window, spei_cut, iv, n, pbe_n) %>% 
     summarise(r2 = round(mean(training_r2), 3), .groups = "drop") %>% 
     mutate(spei_cut = as.factor(spei_cut),
            spei_window = paste(spei_window, "months")) ->
     out_smry
+
+```
+
+## Random Forest results
+
+```{r rf-results}
+
 
 # Table: Training R2 values
 out_smry %>%
@@ -362,79 +471,6 @@ out_ranked %>%
 -   **RF model explains 52-65% of OOB variability**
 
 -   **Precip and Tair are uniformly important; LAI and soil temp/VWC medium importance; PBE (drought effect from previous year) not important**
-
-## Linear model: PBE importance and interactions
-
-```{r test-linear}
-#| fig-width: 10
-#| fig-height: 6
-
-dat_filtered %>% 
-    mutate(PBE = SPEI12_y1 <= -1 & SPEI12 > 0) %>% 
-    select(sqrt_Rs_annual, 
-           Ecosystem_type, SPEI12, PBE, 
-           Tair, Tsoil_lev1, Tsoil_lev2,
-           Precip, VWC_lev1, VWC_lev2, 
-           Veg_type_hi, Veg_type_low, LAI_high, 
-           Soil_type_name) %>% 
-    filter(complete.cases(.)) ->
-    dat_linear
-
-message("Fitting Rs_annual linear model with PBE (SPEI12, -1.0) effect...")
-m_Rs <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
-            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * PBE +
-            Ecosystem_type + LAI_high + Veg_type_hi + Veg_type_low + Soil_type_name,
-        data = dat_linear)
-m_Rs_reduced <- MASS::stepAIC(m_Rs, trace = FALSE)
-summary(m_Rs_reduced)
-par(mfrow = c(2, 2))
-plot(m_Rs_reduced)
-
-library(car)
-car::Anova(m_Rs_reduced, type = "III")
-
-message("Fitting Rs_annual linear model without PBE effect...")
-m_Rs_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
-            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) +
-            Ecosystem_type + LAI_high + Veg_type_hi + Veg_type_low + Soil_type_name,
-        data = dat_linear)
-
-tibble(model_with_PBE = predict(m_Rs),
-       model_without_PBE = predict(m_Rs_no_PBE),
-       PBE = dat_linear$PBE, 
-       Ecosystem_type = dat_linear$Ecosystem_type) %>% 
-    ggplot(aes(model_without_PBE, model_with_PBE)) + 
-    geom_point(aes(color = PBE)) + 
-    geom_abline() + 
-    facet_wrap(~Ecosystem_type) +
-    ggtitle("Linear model: effect of including PBE on sqrt_Rs_annual")
-
-message("Interactive PBE effects:")
-library(broom)
-tidy(m_Rs_reduced) %>% 
-    mutate(model = "Rs_annual") %>% 
-    filter(grepl("PBE", term)) %>% 
-    separate(term, into = c("interaction", "PBE"), fill = "left", sep = ":") %>% 
-    replace_na(list(interaction = "(none)")) %>% 
-    select(model, interaction, estimate, p.value) %>% 
-    mutate(estimate = round(estimate, 4), p.value = round(p.value, 4)) ->
-    PBE_interactions
-
-DT::datatable(PBE_interactions)
-
-# Summary table of significant effect directions
-PBE_interactions %>% 
-    mutate(signif = p.value < 0.05, 
-           effect = case_when(signif & estimate < 0 ~ "Positive",
-                              signif & estimate >= 0 ~ "Negative",
-                              .default = "")) %>% 
-    select(model, interaction, effect) %>%
-    pivot_wider(values_from = effect, names_from = model, values_fill = "") %>% 
-    knitr::kable(caption = "PBE: significant effect directions")
-
-```
-
-**Conclusion: PBE (potential Birch effect, i.e. having a strong drought the year before a well-watered year) has a strong statistical effect on the temperature and moisture drivers of soil respiration. But, it's inconsistent—there's no clean 'Birch effect.'**
 
 ## Reproducibility
 
