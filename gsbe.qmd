@@ -79,7 +79,8 @@ We have three potential independent variables:
 
 -   `Rs_growingseason` (mean growing season soil respiration)
 
-Their distributions are expected to be non-normal, which is a problem for linear models and not ideal for anything. Evaluate possible transformations.
+Their distributions are expected to be non-normal, which is a problem for
+linear models and not ideal for anything. Evaluate possible transformations.
 
 ```{r iv-dist}
 #| fig-width: 10
@@ -111,7 +112,8 @@ dat_filtered %>%
 
 We are using the `ranger` package.
 
-Wright, M. N. and Ziegler, A.: Ranger: A fast implementation of random forests for high dimensional data in C++ and R, J. Stat. Softw., 77, https://doi.org/10.18637/jss.v077.i01, 2017.
+Wright, M. N. and Ziegler, A.: Ranger: A fast implementation of random forests
+for high dimensional data in C++ and R, J. Stat. Softw., 77, https://doi.org/10.18637/jss.v077.i01, 2017.
 
 ```{r test-rf}
 #| fig-width: 10
@@ -257,13 +259,16 @@ message("R2 against validation data = ", round(r2(preds = preds, obs = obs), 3))
 
 Note however that
 
->Unlike random forests, GBMs can have high variability in accuracy dependent on their hyperparameter settings (Probst, Bischl, and Boulesteix 2018). So tuning can require much more strategy than a random forest model.
+>Unlike random forests, GBMs can have high variability in accuracy dependent
+on their hyperparameter settings (Probst, Bischl, and Boulesteix 2018). So 
+tuning can require much more strategy than a random forest model.
 
 **Conclusion: performance and variable importance seem similar to `ranger`.**
 
 ## Test spatial Random Forest
 
-Spatial autocorrelation wouldn't change the fit of the model, but it could bias the variable importance metrics. Evaluate.
+Spatial autocorrelation wouldn't change the fit of the model, but it could bias
+the variable importance metrics. Evaluate.
 
 ```{r spatial-rf}
 
