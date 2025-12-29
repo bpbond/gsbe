@@ -211,9 +211,10 @@ Our `PBE` flag is a binary variable, so is its importance being under-valued by 
 
 ```{r conditional-inference}
 library(party)
+set.seed(123)
 training <- sample(nrow(test), 0.9 * nrow(test), replace = FALSE)
 m_ci <- cforest(sqrt_Rs_annual ~ ., data = test[training,])
-message("Variable importance of CI tree:")
+message("Variable importance of CI forest:")
 sort(varimp(m_ci), decreasing = TRUE)
 
 obs <- test[-training,]$sqrt_Rs_annual
@@ -223,7 +224,33 @@ tss <- sum((obs - mean(obs)) ^ 2)
 message("R2 against validation data = ", round(1 - rss / tss, 3))
 ```
 
-**Conclusion: no evidence that conditional inference random forest is producing different results.**
+**Conclusion: no evidence that conditional inference random forest produces different results.**
+
+## XGBoost
+
+What about it?
+
+```{r xgboost}
+library(xgboost)
+set.seed(123)
+training <- sample(nrow(test), 0.9 * nrow(test), replace = FALSE)
+m_xgb <- m <- xgboost(test[training,-1], test$sqrt_Rs_annual[training])
+
+message("Variable importance of XGBoost model:")
+as_tibble(xgb.importance(m_xgb))
+
+obs <- test[-training,]$sqrt_Rs_annual
+pred <- predict(m_xgb, newdata = test[-training,])
+rss <- sum((pred - obs) ^ 2)
+tss <- sum((obs - mean(obs)) ^ 2)
+message("R2 against validation data = ", round(1 - rss / tss, 3))
+```
+
+Note however that
+
+\>Unlike random forests, GBMs can have high variability in accuracy dependent on their hyperparameter settings (Probst, Bischl, and Boulesteix 2018). So tuning can require much more strategy than a random forest model.
+
+**Conclusion: performance and variable importance seem similar to `ranger`.**
 
 ## Test spatial Random Forest
 
