@@ -18,7 +18,7 @@ Month
 January, February, March, April, May, June, July, August, September, October, November, December
 
 Variable
-2m temperature, Soil temperature level 1, Soil temperature level 2, Volumetric soil water layer 1, Volumetric soil water layer 2, Total precipitation, Leaf area index high vegetation
+2m temperature, Soil temperature level 1, Soil temperature level 2, Volumetric soil water layer 1, Volumetric soil water layer 2, Total precipitation, Leaf area index high vegetation, Leaf area index low vegetation
 
 Data format
 GRIB

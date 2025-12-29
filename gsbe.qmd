@@ -11,14 +11,25 @@ editor: visual
 ```{r setup}
 #| include: false
 
+# Data processing and visualization packages
 library(dplyr)
 library(tidyr)
 library(ggplot2)
 theme_set(theme_bw())
 library(readr)
 library(lubridate)
+
+# Main analysis packages
+library(ranger)
+library(vivid)
 library(broom)
 library(car)
+
+# Specialized packages used only for testing alternatives
+library(party)
+library(xgboost)
+library(geodist)
+library(spatialRF)
 ```
 
 ```{r read-data}
@@ -100,7 +111,6 @@ Wright, M. N. and Ziegler, A.: Ranger: A fast implementation of random forests f
 
 # Fit random forest model and test against validation data
 # The i.v. is in the first column
-library(ranger)
 fit_and_test_rf <- function(x_train, x_val) {
     f <- as.formula(paste(colnames(x_train)[1], "~ ."))
     rf <- ranger::ranger(formula = f, data = x_train, importance = "impurity")
@@ -131,7 +141,7 @@ dat_filtered %>%
            SPEI12, PBE, 
            Tair, Tsoil_lev1, Tsoil_lev2,
            Precip, VWC_lev1, VWC_lev2, 
-           LAI_high, Ecosystem_type,
+           LAI_high, LAI_low, Ecosystem_type,
            Veg_type_hi, Veg_type_low, Soil_type_name) %>% 
     filter(complete.cases(.)) -> 
     test
@@ -144,7 +154,6 @@ print(rf_all_data)
 
 imps <- sort(rf_all_data$variable.importance, decreasing = TRUE)
 
-library(vivid)
 # Top three variables...
 pdpVars(data = test, 
         fit = rf_all_data, 
@@ -189,7 +198,7 @@ rf_modis <- ranger(sqrt_Rs_annual ~ ., data = test1)
 dat_filtered %>% 
     select(sqrt_Rs_annual, Longitude, Latitude,
            Ecosystem_type, SPEI12, #MODIS_NPP, MODIS_GPP,
-           Tair:LAI_high, Soil_type_name) %>% 
+           Tair:LAI_low, Soil_type_name) %>% 
     filter(complete.cases(.)) -> 
     test2
 rf_no_modis <- ranger(sqrt_Rs_annual ~ ., data = test1)
@@ -210,7 +219,6 @@ From <https://bradleyboehmke.github.io/HOML/random-forest.html>.
 Our `PBE` flag is a binary variable, so is its importance being under-valued by `ranger`? Test a conditional inference tree-based forest:
 
 ```{r conditional-inference}
-library(party)
 set.seed(123)
 training <- sample(nrow(test), 0.9 * nrow(test), replace = FALSE)
 m_ci <- cforest(sqrt_Rs_annual ~ ., data = test[training,])
@@ -231,7 +239,6 @@ message("R2 against validation data = ", round(1 - rss / tss, 3))
 What about it?
 
 ```{r xgboost}
-library(xgboost)
 set.seed(123)
 training <- sample(nrow(test), 0.9 * nrow(test), replace = FALSE)
 m_xgb <- m <- xgboost(test[training,-1], test$sqrt_Rs_annual[training])
@@ -266,16 +273,14 @@ stopifnot(packageVersion("spatialRF") >= "1.1.5")
 dat_filtered %>% 
     select(sqrt_Rs_annual, Longitude, Latitude,
            Ecosystem_type, SPEI12, #MODIS_NPP, MODIS_GPP,
-           Tair:LAI_high, Soil_type_name) %>% 
+           Tair:LAI_low, Soil_type_name) %>% 
     filter(complete.cases(.)) -> 
     test
 
 # Compute distance between all pairs of points
-library(geodist)
 dm <- geodist(select(test, Longitude, Latitude), measure = "geodesic")
 test$Longitude <- test$Latitude <- NULL
 
-library(spatialRF)
 rf_sp <- spatialRF::rf(data = test, 
                        dependent.variable.name = colnames(test)[1],
                        predictor.variable.names = setdiff(colnames(test), colnames(test)[1]),
@@ -298,20 +303,17 @@ dat_filtered %>%
            SPEI12, PBE, 
            Tair, Tsoil_lev1, Tsoil_lev2,
            Precip, VWC_lev1, VWC_lev2, 
-           Veg_type_hi, Veg_type_low, LAI_high, 
+           Veg_type_hi, Veg_type_low, LAI_high, LAI_low,
            Soil_type_number) %>% 
     filter(complete.cases(.)) ->
     dat_linear
 
 message("Fitting Rs_annual linear model with PBE (SPEI12, -1.0) effect...")
-# We reuse this 'lm_with_PBE' function below
-lm_with_PBE <- function(x) {
-    lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
+m_Rs <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
             VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * PBE +
-            Ecosystem_type_number + LAI_high + Veg_type_hi + Veg_type_low + Soil_type_number,
-        data = x)
-}
-m_Rs <- lm_with_PBE(dat_linear)
+            Ecosystem_type_number + LAI_high * LAI_low + 
+            Veg_type_hi + Veg_type_low + Soil_type_number,
+        data = dat_linear)
 m_Rs_reduced <- MASS::stepAIC(m_Rs, trace = FALSE)
 summary(m_Rs_reduced)
 par(mfrow = c(2, 2))
@@ -322,7 +324,8 @@ car::Anova(m_Rs_reduced, type = "III")
 message("Fitting Rs_annual linear model without PBE effect...")
 m_Rs_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
             VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) +
-            Ecosystem_type_number + LAI_high + Veg_type_hi + Veg_type_low + Soil_type_number,
+            Ecosystem_type_number + LAI_high * LAI_low + 
+                Veg_type_hi + Veg_type_low + Soil_type_number,
         data = dat_linear)
 
 tibble(model_with_PBE = predict(m_Rs),
@@ -372,7 +375,11 @@ PBE_interactions %>%
 ```{r analysis1}
 
 fit_and_test_lm <- function(x_train, x_val) {
-    m <- lm_with_PBE(x_train)
+    m <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
+            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * PBE +
+            Ecosystem_type_number + LAI_high * LAI_low + 
+            Veg_type_hi + Veg_type_low + Soil_type_number,
+        data = x_train)
     m_reduced <- MASS::stepAIC(m, trace = FALSE)
     list(model = m_reduced,
          training_r2 = glance(m_reduced)$r.squared,
@@ -398,7 +405,7 @@ predictors <- c("Ecosystem_type",
                 "Tair", "Precip",
                 "Tsoil_lev1", "Tsoil_lev2", "VWC_lev1", "VWC_lev2", 
                 "Veg_type_hi", "Veg_type_low", 
-                "LAI_high", "Soil_type_name")
+                "LAI_high", "LAI_low", "Soil_type_name")
 
 do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs) {
     results <- list()

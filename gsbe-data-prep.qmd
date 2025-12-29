@@ -270,7 +270,7 @@ We use two strategies to deal with this:
 #| fig-width: 10
 
 # Load cached data if available
-ERA5_SHORT_NAME <- read_csv("ERA5_short_names.csv", col_types = "cc")
+ERA5_SHORT_NAME <- read_csv("data-ERA5/ERA5_short_names.csv", col_types = "cc")
 ERA5_CACHE <- "caches/ERA5_data_cache.parquet"
 if(file.exists(ERA5_CACHE)) {
     message("Reading cache file ", ERA5_CACHE)
@@ -307,7 +307,7 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
         # Construct year-specific file name; these were downloaded from ECMWF
         # and contain 2m temperature, soil temperature levels 1 and 2, 
         # volumetric soil water content levels 1 and 2, total precipitation,
-        # and LAI of high vegetation
+        # and LAI of high and low vegetation
         f <- file.path("data-ERA5/", paste0("ERA5_", yr, ".grib"))
         if(!file.exists(f)) {
             message("\t", f, " does not exist; skipping")
@@ -325,8 +325,10 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
         y <- terra::extract(x, srdb_yrlonlat[i,][-1]) # this is the expensive step
         y %>% 
             pivot_longer(-ID) %>% 
-            mutate(time = time(x), Year = yr, Longitude = lon, Latitude = lat) %>% 
-            left_join(ERA5_SHORT_NAME, by = "name") %>% 
+            mutate(time = time(x), 
+                   Year = yr, 
+                   Longitude = lon, Latitude = lat,
+                   short_name = rep(ERA5_SHORT_NAME$short_name, length.out = n())) %>% 
             select(Year, time, Longitude, Latitude, short_name, value) ->
             dat
         cache <- bind_rows(cache, dat)
@@ -336,8 +338,8 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
 }
 
 # At this point the cache data frame has all the needed data
-# Reshape, summarise to annual (NB this may change in the future),
-# and join with SRDB data
+# Reshape, summarise to annual (although this may change in
+# the future), and join with SRDB data
 message("Summarizing and joining with SRDB data...")
 cache %>% 
     mutate(time = as.Date(time)) %>% 
@@ -350,6 +352,7 @@ cache %>%
               VWC_lev2 = round(mean(VWC_lev2), 3),
               Precip = round(sum(Precip) * 1000, 2),
               LAI_high = round(max(LAI_high), 2),
+              LAI_low = round(max(LAI_low), 2),
               .groups = "drop") ->
     cache_summary
 
@@ -378,6 +381,13 @@ ggplot(world) +
                aes(x = Longitude, y = Latitude, color = LAI_high),
                na.rm = TRUE) + 
     ggtitle("SRDB with ERA5 max high LAI")
+
+ggplot(world) + 
+    geom_sf() + 
+    geom_point(data = srdb_sample, 
+               aes(x = Longitude, y = Latitude, color = LAI_low),
+               na.rm = TRUE) + 
+    ggtitle("SRDB with ERA5 max low LAI")
 
 ```
 
@@ -639,7 +649,7 @@ if(sum(na_data) > 0) {
 
 srdb_sample %>% 
     select(Biome, Ecosystem_type, Rs_annual, Rh_annual, Rs_growingseason,
-           Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high, 
+           Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high, LAI_low,
            MODIS_NPP, MODIS_GPP) %>% 
     pivot_longer(Tair:MODIS_GPP, names_to = "covariate_name", values_to = "covariate_value") %>%
     pivot_longer(Rs_annual:Rs_growingseason) %>% 
@@ -650,7 +660,7 @@ srdb_sample %>%
 srdb_sample %>% 
     filter(!Biome == "Semi-arid", !Biome == "Unknown") %>% 
     select(Biome, Ecosystem_type, Rs_annual, 
-           Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high) %>% 
+           Tair, Tsoil_lev1, VWC_lev1, Precip, LAI_high, LAI_low) %>% 
     pivot_longer(Tair:LAI_high, names_to = "covariate_name", values_to = "covariate_value") %>% 
     ggplot(aes(Rs_annual, covariate_value, color = Biome)) + 
         facet_grid(covariate_name ~ Biome, scales = "free") +

@@ -6,3 +6,4 @@ SFC (Ground or water surface); 2 metre temperature [C],Tair
 7-28[cm] DBLY (layer between 2 depths below land surface); Volumetric soil water layer 2 [m^3/m^3],VWC_lev2
 SFC (Ground or water surface); Total precipitation [m],Precip
 SFC (Ground or water surface); undefined [-],LAI_high
+SFC (Ground or water surface); undefined [-],LAI_low
