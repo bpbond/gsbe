@@ -201,6 +201,30 @@ message("Model *without* MODIS data OOB R2 = ", round(rf_no_modis$r.squared, 4))
 
 **Conclusion: it doesn't seem like they're needed.**
 
+## Conditional inference Random Forest
+
+> Recall the default splitting rule during random forests tree building consists of selecting, out of all splits of the (randomly selected *mtry*) candidate variables, the split that minimizes the Gini impurity (in the case of classification) and the SSE (in case of regression). **However, \[Strobl et al. (2007)\](**<https://doi.org/10.1186/1471-2105-8-25>**) illustrated that these default splitting rules favor the selection of features with many possible splits (e.g., continuous variables or categorical variables with many categories) over variables with fewer splits (the extreme case being binary variables, which have only one possible split).** Conditional inference trees (Hothorn, Hornik, and Zeileis 2006) implement an alternative splitting mechanism that helps to reduce this variable selection bias. However, ensembling conditional inference trees has yet to be proven superior with regards to predictive accuracy and they take a lot longer to train.
+
+From <https://bradleyboehmke.github.io/HOML/random-forest.html>.
+
+Our `PBE` flag is a binary variable, so is its importance being under-valued by `ranger`? Test a conditional inference tree-based forest:
+
+```{r conditional-inference}
+library(party)
+training <- sample(nrow(test), 0.9 * nrow(test), replace = FALSE)
+m_ci <- cforest(sqrt_Rs_annual ~ ., data = test[training,])
+message("Variable importance of CI tree:")
+sort(varimp(m_ci), decreasing = TRUE)
+
+obs <- test[-training,]$sqrt_Rs_annual
+pred <- predict(m_ci, newdata = test[-training,])
+rss <- sum((pred - obs) ^ 2)
+tss <- sum((obs - mean(obs)) ^ 2)
+message("R2 against validation data = ", round(1 - rss / tss, 3))
+```
+
+**Conclusion: no evidence that conditional inference random forest is producing different results.**
+
 ## Test spatial Random Forest
 
 Spatial autocorrelation wouldn't change the fit of the model, but it could bias the variable importance metrics. Evaluate.
