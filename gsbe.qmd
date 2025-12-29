@@ -30,6 +30,14 @@ library(party)
 library(xgboost)
 library(geodist)
 library(spatialRF)
+
+# Utility function
+r2 <- function(preds, obs) {
+    stopifnot(length(preds) == length(obs))
+    rss <- sum((preds - obs) ^ 2)
+    tss <- sum((obs - mean(obs)) ^ 2)
+    return(1 - rss / tss)
+}
 ```
 
 ```{r read-data}
@@ -73,7 +81,7 @@ We have three potential independent variables:
 
 Their distributions are expected to be non-normal, which is a problem for linear models and not ideal for anything. Evaluate possible transformations.
 
-```{r}
+```{r iv-dist}
 #| fig-width: 10
 #| fig-height: 8
 
@@ -119,9 +127,7 @@ fit_and_test_rf <- function(x_train, x_val) {
     if(!is.null(x_val)) {
         preds <- predict(rf, data = x_val)$predictions
         obs <- pull(x_val[1])
-        rss <- sum((preds - obs) ^ 2)
-        tss <- sum((obs - mean(obs)) ^ 2)
-        validation_r2 <- 1 - rss / tss
+        validation_r2 <- r2(preds = preds, obs = obs)
     } else {
         validation_r2 <- NA_real_
     }
@@ -186,7 +192,7 @@ tibble(model_with_PBE =rf_all_data$predictions,
 
 The MODIS data only start in 2001 (see `gsbe-data-prep` output), so requiring them in a model cuts off a lot of early data – on the order of 20% of the dataset. Are they needed?
 
-```{r}
+```{r test-modis}
 dat_filtered %>% 
     select(sqrt_Rs_annual,
            Ecosystem_type, SPEI12, MODIS_NPP, MODIS_GPP,
@@ -226,10 +232,8 @@ message("Variable importance of CI forest:")
 sort(varimp(m_ci), decreasing = TRUE)
 
 obs <- test[-training,]$sqrt_Rs_annual
-pred <- predict(m_ci, newdata = test[-training,])
-rss <- sum((pred - obs) ^ 2)
-tss <- sum((obs - mean(obs)) ^ 2)
-message("R2 against validation data = ", round(1 - rss / tss, 3))
+preds <- predict(m_ci, newdata = test[-training,])
+message("R2 against validation data = ", round(r2(preds = preds, obs = obs), 3))
 ```
 
 **Conclusion: no evidence that conditional inference random forest produces different results.**
@@ -247,15 +251,13 @@ message("Variable importance of XGBoost model:")
 as_tibble(xgb.importance(m_xgb))
 
 obs <- test[-training,]$sqrt_Rs_annual
-pred <- predict(m_xgb, newdata = test[-training,])
-rss <- sum((pred - obs) ^ 2)
-tss <- sum((obs - mean(obs)) ^ 2)
-message("R2 against validation data = ", round(1 - rss / tss, 3))
+preds <- predict(m_xgb, newdata = test[-training,])
+message("R2 against validation data = ", round(r2(preds = preds, obs = obs), 3))
 ```
 
 Note however that
 
-\>Unlike random forests, GBMs can have high variability in accuracy dependent on their hyperparameter settings (Probst, Bischl, and Boulesteix 2018). So tuning can require much more strategy than a random forest model.
+>Unlike random forests, GBMs can have high variability in accuracy dependent on their hyperparameter settings (Probst, Bischl, and Boulesteix 2018). So tuning can require much more strategy than a random forest model.
 
 **Conclusion: performance and variable importance seem similar to `ranger`.**
 
@@ -381,8 +383,20 @@ fit_and_test_lm <- function(x_train, x_val) {
             Veg_type_hi + Veg_type_low + Soil_type_number,
         data = x_train)
     m_reduced <- MASS::stepAIC(m, trace = FALSE)
+    
+    if(!is.null(x_val)) {
+        preds <- predict(m_reduced, newdata = x_val)
+        obs <- pull(x_train[1])
+        rss <- sum((preds - obs) ^ 2)
+        tss <- sum((obs - mean(obs)) ^ 2)
+        validation_r2 <- 1 - rss / tss
+    } else {
+        validation_r2 <- NA_real_
+    }
+
     list(model = m_reduced,
          training_r2 = glance(m_reduced)$r.squared,
+         validation_r2 = validation_r2,
          importance = tidy(m_reduced))
 }
 
@@ -408,7 +422,8 @@ predictors <- c("Ecosystem_type",
                 "LAI_high", "LAI_low", "Soil_type_name")
 
 do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs) {
-    results <- list()
+    rf_results <- list()
+    lm_results <- list()
     SPEI_cols <- colnames(x)[grep("^SPEI", colnames(x))]
     for(iv in iv_set) {
         
@@ -437,16 +452,16 @@ do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs) 
                 
                 # Fit models and save results
                 rf_out <- fit_and_test_rf(this_x, NULL)
-                rf_results <- tibble(spei_window = w,
-                                     spei_cut = spei_cut,
-                                     iv = iv,
-                                     predictor = names(rf_out$importance),
-                                     n = nrow(this_x),
-                                     pbe_n = sum(this_x$PBE),
-                                     importance = rf_out$importance,
-                                     training_r2 = rf_out$training_r2)
-                results[[paste(iv, w, spei_cut)]] <- rf_results
-
+                rf_results[[paste(iv, w, spei_cut)]] <- 
+                    tibble(spei_window = w,
+                           spei_cut = spei_cut,
+                           iv = iv,
+                           predictor = names(rf_out$importance),
+                           n = nrow(this_x),
+                           pbe_n = sum(this_x$PBE),
+                           importance = rf_out$importance,
+                           training_r2 = rf_out$training_r2)
+                
                 # lm_out <- fit_and_test_lm(this_x, NULL)
                 # lm_results <- tibble(spei_window = w,
                 #                      spei_cut = spei_cut,
@@ -459,7 +474,7 @@ do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs) 
             }
         }
     }
-    bind_rows(results)
+    bind_rows(rf_results)
 }
 
 out <- do_full_analysis(dat_filtered,
@@ -525,7 +540,7 @@ out_ranked %>%
 
 ## Reproducibility
 
-```{r}
+```{r reproducibility}
 #| echo: false
 
 sessionInfo()
