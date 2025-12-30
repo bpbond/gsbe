@@ -31,7 +31,7 @@ library(xgboost)
 library(geodist)
 library(spatialRF)
 
-# Utility function
+# Utility function: very simple R2 computation
 r2 <- function(preds, obs) {
     stopifnot(length(preds) == length(obs))
     rss <- sum((preds - obs) ^ 2)
@@ -41,10 +41,6 @@ r2 <- function(preds, obs) {
 ```
 
 ```{r read-data}
-
-SSD <- 123
-message("set.seed = ", SSD)
-set.seed(SSD)
 
 dat <- read_csv("srdb_joined_data.csv", show_col_types = FALSE)
 
@@ -379,22 +375,21 @@ PBE_interactions %>%
 
 ## PBE sensitivity test
 
-```{r analysis1}
+```{r sensitivity-test}
 
 fit_and_test_lm <- function(x_train, x_val) {
-    m <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
-            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * PBE +
-            Ecosystem_type_number + LAI_high * LAI_low + 
-            Veg_type_hi + Veg_type_low + Soil_type_number,
-        data = x_train)
+    f <- as.formula(paste(colnames(x_train)[1], "~ (Tair + Tsoil_lev1 + Tsoil_lev2 +",
+                          "VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2))",
+                          "* PBE + Ecosystem_type + LAI_high * LAI_low +",
+                          "Veg_type_hi + Veg_type_low + Soil_type_name"))
+
+    m <- lm(formula = f, data = x_train)
     m_reduced <- MASS::stepAIC(m, trace = FALSE)
     
     if(!is.null(x_val)) {
         preds <- predict(m_reduced, newdata = x_val)
         obs <- pull(x_train[1])
-        rss <- sum((preds - obs) ^ 2)
-        tss <- sum((obs - mean(obs)) ^ 2)
-        validation_r2 <- 1 - rss / tss
+        validation_r2 <- rs(preds = preds, obs = obs)
     } else {
         validation_r2 <- NA_real_
     }
@@ -444,13 +439,13 @@ do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs) 
                 message("---------------------------------------------")
                 message("iv = ", iv)
                 message("spei_cut = ", spei_cut, " window = ", w)
-                message("\tn = ", nrow(this_x))
+                #message("\tn = ", nrow(this_x))
                 
                 # identify observations not currently in a drought but that
                 # WERE in a drought the previous year
                 # PBE = potential Birch effect
                 this_x$PBE = this_x$SPEI12 > 0 & this_x[spei_past_col] <= spei_cut
-                message("\tPBE = ", sum(this_x$PBE))
+                #message("\tPBE = ", sum(this_x$PBE))
                 
                 # Drop non-predictors entirely now
                 this_x <- this_x[c(iv, predictors, "PBE")]
@@ -458,7 +453,8 @@ do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs) 
                 # Fit models and save results
                 rf_out <- fit_and_test_rf(this_x, NULL)
                 rf_results[[paste(iv, w, spei_cut)]] <- 
-                    tibble(spei_window = w,
+                    tibble(model = "rf",
+                           spei_window = w,
                            spei_cut = spei_cut,
                            iv = iv,
                            predictor = names(rf_out$importance),
@@ -467,19 +463,22 @@ do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs) 
                            importance = rf_out$importance,
                            training_r2 = rf_out$training_r2)
                 
-                # lm_out <- fit_and_test_lm(this_x, NULL)
-                # lm_results <- tibble(spei_window = w,
-                #                      spei_cut = spei_cut,
-                #                      iv = iv,
-                #                      predictor = names(rf_out$importance),
-                #                      n = nrow(this_x),
-                #                      pbe_n = sum(this_x$PBE),
-                #                      training_r2 = lm_out$training_r2)
+                lm_out <- fit_and_test_lm(this_x, NULL)
+                lm_results[[paste(iv, w, spei_cut)]] <- 
+                    tibble(model = "lm",
+                           spei_window = w,
+                           spei_cut = spei_cut,
+                           iv = iv,
+                           predictor = lm_out$importance$term,
+                           importance = lm_out$importance$p.value,
+                           n = nrow(this_x),
+                           pbe_n = sum(this_x$PBE),
+                           training_r2 = lm_out$training_r2)
  
             }
         }
     }
-    bind_rows(rf_results)
+    bind_rows(bind_rows(rf_results), bind_rows(lm_results))
 }
 
 out <- do_full_analysis(dat_filtered,
@@ -489,34 +488,41 @@ out <- do_full_analysis(dat_filtered,
 
 # Compute means across the SPEI windows, drought definitions, and i.v.'s
 out %>% 
-    group_by(spei_window, spei_cut, iv, n, pbe_n) %>% 
+    group_by(model, spei_window, spei_cut, iv, n, pbe_n) %>% 
     summarise(r2 = round(mean(training_r2), 3), .groups = "drop") %>% 
     mutate(spei_cut = as.factor(spei_cut),
            spei_window = paste(spei_window, "months")) ->
     out_smry
 
+# Table: number (and % of total) of TRUE PBE entries; how big are the datasets?
+out_smry %>%
+    # these numbers are the same for each model type; pick one
+    filter(model == "rf") %>% 
+    mutate(pbe_n = paste0(pbe_n, " (", round(pbe_n / n * 100, 0), "%)")) %>% 
+    select(spei_window, spei_cut, iv, pbe_n) %>% 
+    pivot_wider(names_from = "iv", values_from = "pbe_n") %>% 
+    knitr::kable(caption = "How often do 'PBE events' occur?", align = "r")
+
 ```
 
-## Random Forest results
+**Conclusions:**
 
-```{r rf-results}
+-   **PBE events (low SPEI the previous year, followed by non-drought conditions) occur in 0-20% of the data, depending on criteria.**
 
+## Random Forest sensitivity results
+
+```{r rf-sensitivity}
 
 # Table: Training R2 values
 out_smry %>%
+    filter(model == "rf") %>% 
     select(spei_window, spei_cut, iv, r2) %>% 
     pivot_wider(names_from = "iv", values_from = "r2") %>% 
     knitr::kable(caption = "RF training (OOB) R2")
 
-# Table: number (and % of total) of TRUE PBE entries; how big are the datasets?
-out_smry %>%
-    mutate(pbe_n = paste0(pbe_n, " (", round(pbe_n / n * 100, 0), "%)")) %>% 
-    select(spei_window, spei_cut, iv, pbe_n) %>% 
-    pivot_wider(names_from = "iv", values_from = "pbe_n") %>% 
-    knitr::kable(caption = "RF training PBE_N", align = "r")
-
 # Table: rank of PBE variable
 out %>% 
+    filter(model == "rf") %>% 
     group_by(spei_window, spei_cut, iv) %>% 
     mutate(rank = min_rank(desc(importance))) ->
     out_ranked
@@ -542,6 +548,40 @@ out_ranked %>%
 -   **RF model explains 52-65% of OOB variability**
 
 -   **Precip and Tair are uniformly important; LAI and soil temp/VWC medium importance; PBE (drought effect from previous year) not important**
+
+## Linear model sensitivity results
+
+```{r lm-sensitivity}
+# Table: Training R2 values
+out_smry %>%
+    filter(model == "lm") %>% 
+    select(spei_window, spei_cut, iv, r2) %>% 
+    pivot_wider(names_from = "iv", values_from = "r2") %>% 
+    knitr::kable(caption = "lm training adjusted R2")
+
+# Rank of significant variables
+# We're using the p-value for a crude approach
+out %>% 
+    filter(model == "lm", importance < 0.05, grepl("PBE", predictor)) %>% 
+    group_by(iv, predictor) %>% 
+    mutate(n_signif = n()) %>% 
+    ggplot(aes(iv, predictor, fill = n_signif)) + 
+    geom_tile() + 
+    xlab("Independent variable") +
+    ggtitle("PBE significance counts in linear model")
+
+message("PBE is significant by itself in a few models:")
+out %>% 
+    filter(predictor=="PBETRUE", model=="lm", importance < 0.05) %>% 
+    select(-model, -training_r2)
+```
+**Conclusions:**
+
+-   **The values used for SPEI window (12/24 months) and drought level (0, -1, -1.5) don't make much difference.**
+
+-   **The linear model explains 16-27% of training data variability.**
+
+-   **PBE interacts with Tair (esp. in predicting Rs_annual), Tsoil, and VWC.**
 
 ## Reproducibility
 
