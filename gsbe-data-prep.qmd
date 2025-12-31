@@ -467,7 +467,7 @@ for(i in seq_len(nrow(srdb_yrlonlat))) {
     } else {
         # Use MODISTools to download the needed data
         if(cache_hits > 0) { 
-            message("(", last_cache_hits, " cache hits)")
+            message("(", cache_hits, " cache hits)")
             cache_hits <- 0
         }
         message(i, "/", nrow(srdb_yrlonlat), ": ", yr, " ", lon, " ", lat, appendLF = FALSE)
