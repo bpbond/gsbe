@@ -241,7 +241,8 @@ spei_annual %>%
     left_join(select(srdb_pbe, ID, SRDB_Year = Year), by = "ID") %>% 
     ggplot(aes(Year, SPEI12, color = SRDB_Year == Year)) + 
     geom_point(na.rm = TRUE) + 
-    geom_hline(yintercept = c(0, -1), linetype = 2) +
+    geom_hline(yintercept = c(0, -1), linetype = 2, color = "black") +
+    scale_color_manual(values = c("black", "red")) +
     facet_grid(ID ~ .) +
     ggtitle("Are we identifying SPEI12 jumps (<=-1 to >0) in SRDB correctly? (random 10)")
 ```
