@@ -3,6 +3,7 @@ title: "gsbe"
 author: "bbl"
 format:
   html:
+    embed-resources: true
     code-fold: true
 toc: true
 editor: visual
@@ -18,6 +19,7 @@ library(ggplot2)
 theme_set(theme_bw())
 library(readr)
 library(lubridate)
+library(arrow)
 
 # Main analysis packages
 library(ranger)
@@ -39,6 +41,21 @@ r2 <- function(preds, obs) {
     return(1 - rss / tss)
 }
 ```
+
+## Background and science questions
+
+(short background)
+
+We ask four questions of increasing specificity:
+
+1. Does SPEI -- incorporating the statistical deviations of precipitation and evaporative demand in a single index -- add _Rs_ predictive information beyond that of climate, LAI, and remotely-derived productivity?
+
+2. Does the previous year's SPEI value have _Rs_ predictive value?
+
+2. For an _Rs_ observation in a non-drought year _following one or more drought years_, does the previous year's SPEI have predictive value?
+
+3. Is there a 'Birch effect' in the observational record, in which non-drought _Rs_ is higher than it otherwise would be when preceded by a drought?
+
 
 ```{r read-data}
 
@@ -575,13 +592,18 @@ out %>%
     filter(predictor=="PBETRUE", model=="lm", importance < 0.05) %>% 
     select(-model, -training_r2)
 ```
+
 **Conclusions:**
 
 -   **The values used for SPEI window (12/24 months) and drought level (0, -1, -1.5) don't make much difference.**
 
 -   **The linear model explains 16-27% of training data variability.**
 
--   **PBE interacts with Tair (esp. in predicting Rs_annual), Tsoil, and VWC.**
+-   **PBE significantly interacts with Tair (esp. in predicting Rs_annual), Tsoil, and VWC.**
+
+## 
+
+-   TODO: try fitting a model with last year's SPEI but not PBE flag? broader test
 
 ## Reproducibility
 

@@ -38,9 +38,16 @@ for(yr in 1985:2024) {
 
 # ========= Soil and vegetation ERA5 data
 
-lc <- rast("data-ERA5/ERA5_soil_type.grib") %>% as_tibble()
-names(lc)[1] <- "Soil_type_number"
-write_parquet(lc, "data-ERA5/ERA5_soil_type.parquet")
+x <- rast("data-ERA5/ERA5_soil_type.grib")
+area <- terra::cellSize(x) %>% as.matrix() %>% as_tibble()
+x <- as_tibble(x)
+names(x)[1] <- "Soil_type_number"
+y <- rast("data-ERA5/ERA5_tvh.grib") %>% as_tibble()
+names(y)[1] <- "Veg_type_hi"
+z <- rast("data-ERA5/ERA5_tvl.grib") %>% as_tibble()
+names(z)[1] <- "Veg_type_low"
+
+write_parquet(bind_cols(x, y, z, area), "data-ERA5/ERA5_soil_veg.parquet")
 
 
 # ========= SPEI data
