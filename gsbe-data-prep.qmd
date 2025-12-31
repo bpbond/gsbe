@@ -3,6 +3,7 @@ title: "gsbe-data-prep"
 author: "bbl"
 format:
   html:
+    embed-resources: true
     code-fold: true
 toc: true
 editor: visual
@@ -93,14 +94,6 @@ srdb_sample <- srdb
 srdb_sample %>% 
     select(Longitude, Latitude) ->
     coords
-
-ggplot(world) + 
-    geom_sf() + 
-    geom_point(data = srdb_sample, 
-               aes(x = Longitude, y = Latitude, color = Biome),
-               size = 4,
-               na.rm = TRUE) + 
-    ggtitle(paste0("SRDB subsample N=", nrow(srdb_sample)))
 ```
 
 ## SPEI
@@ -182,13 +175,13 @@ ggplot(spei_annual, aes(Year, SPEI12, color = Biome, group = ID)) +
     geom_line(na.rm = TRUE) + 
     facet_grid(Biome~.) + 
     theme(legend.position = "none") +
-    ggtitle("SPEI12 - annual mean")
+    ggtitle("SPEI12 - annual mean of SRDB sites")
 
 ggplot(spei_annual, aes(Year, SPEI24, color = Biome, group = ID)) + 
     geom_line(na.rm = TRUE) + 
     facet_grid(Biome~.) + 
     theme(legend.position = "none") +
-    ggtitle("SPEI24 - annual mean")
+    ggtitle("SPEI24 - annual mean of SRDB sites")
 
 message("Merging into SRDB data...")
 srdb_sample$ID <- seq_len(nrow(srdb_sample))
@@ -234,7 +227,7 @@ ggplot(srdb_sample, aes(Year, SPEI12_y1, color = Biome)) +
     geom_point(na.rm = TRUE) + 
     facet_grid(Biome~.) + 
     theme(legend.position = "none") +
-    ggtitle("SPEI12 previous year",
+    ggtitle("SPEI12 previous year of SRDB sites",
             subtitle = "Dashed lines show SPEI categories for mild, moderate, and severe dryness")
 
 # Are we identifying SPEI jumps in SRDB correctly?
@@ -249,8 +242,7 @@ spei_annual %>%
     ggplot(aes(Year, SPEI12, color = SRDB_Year == Year)) + 
     geom_point(na.rm = TRUE) + 
     facet_grid(ID ~ .) +
-    ggtitle("Are we identifying SPEI12 jumps (from <=-1 to >0) in SRDB correctly? (random 10)")
-
+    ggtitle("Are we identifying SPEI12 jumps (<=-1 to >0) in SRDB correctly? (random 10)")
 ```
 
 ## Climate data
@@ -381,14 +373,6 @@ ggplot(world) +
                aes(x = Longitude, y = Latitude, color = LAI_high),
                na.rm = TRUE) + 
     ggtitle("SRDB with ERA5 max high LAI")
-
-ggplot(world) + 
-    geom_sf() + 
-    geom_point(data = srdb_sample, 
-               aes(x = Longitude, y = Latitude, color = LAI_low),
-               na.rm = TRUE) + 
-    ggtitle("SRDB with ERA5 max low LAI")
-
 ```
 
 ## Vegetation and soil type data
