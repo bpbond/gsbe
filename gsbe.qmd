@@ -157,7 +157,7 @@ fit_and_test_rf <- function(x_train, x_val) {
 
 # Do a k-fold cross-validation
 # x = data; f = function to call; k = number of folds; ... = params for model
-do_k_fold <- function(x, f, k = 10, quiet = TRUE, ...) {
+do_k_fold <- function(x, f, k = K_FOLD, quiet = TRUE, ...) {
     if(!all(complete.cases(x))) {
         stop("x should not have any NAs at this stage!")
     }
@@ -213,7 +213,7 @@ pdpVars(data = dat_base_test,
         vars = names(imps)[4:6])
 
 message("k-fold cross-validation results:")
-do_k_fold(dat_base_test, fit_and_test_rf, k = K_FOLD) %>% 
+do_k_fold(dat_base_test, fit_and_test_rf) %>% 
     summary()
 
 # 
@@ -305,7 +305,7 @@ message("Variable importance of XGBoost model:")
 as_tibble(xgb.importance(m_xgb))
 
 message("k-fold cross-validation results:")
-do_k_fold(dat_base_test, fit_and_test_xgboost, k = K_FOLD) %>% 
+do_k_fold(dat_base_test, fit_and_test_xgboost) %>% 
     summary()
 ```
 
@@ -344,7 +344,7 @@ par(mfrow = c(2, 2))
 plot(m_Rs_reduced)
 
 message("k-fold cross-validation results:")
-do_k_fold(dat_base_test, fit_and_test_lm, k = K_FOLD, m = m_Rs) %>% 
+do_k_fold(dat_base_test, fit_and_test_lm, m = m_Rs) %>% 
     summary()
 ```
 
