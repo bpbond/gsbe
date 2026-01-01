@@ -12,6 +12,8 @@ editor: visual
 ```{r setup}
 #| include: false
 
+K_FOLD <- 10
+
 # Data processing and visualization packages
 library(dplyr)
 library(tidyr)
@@ -42,20 +44,21 @@ r2 <- function(preds, obs) {
 }
 ```
 
-## Background and science questions
+# Background and science questions
 
 (short background)
 
 We ask four questions of increasing specificity:
 
-1. Does SPEI -- incorporating the statistical deviations of precipitation and evaporative demand in a single index -- add _Rs_ predictive information beyond that of climate, LAI, and remotely-derived productivity?
+1.  Does SPEI -- incorporating the statistical deviations of precipitation and evaporative demand in a single index -- add *Rs* predictive information beyond that of climate, LAI, vegetation, and remotely-derived productivity?
 
-2. Does the previous year's SPEI value have _Rs_ predictive value?
+2.  Does the previous year's SPEI value have *Rs* predictive value? I.e., is there a memory effect?
 
-2. For an _Rs_ observation in a non-drought year _following one or more drought years_, does the previous year's SPEI have predictive value?
+3.  Specifically for *Rs* observations in a non-drought year *following one or more drought years*, does the previous year's SPEI have predictive value?
 
-3. Is there a 'Birch effect' in the observational record, in which non-drought _Rs_ is higher than it otherwise would be when preceded by a drought?
+4.  Is there a 'Birch effect' in the observational record, in which non-drought *Rs* is higher than it otherwise would be when preceded by a drought?
 
+# 0. Prep work and base models
 
 ```{r read-data}
 
@@ -75,6 +78,7 @@ dat %>%
                                                           "Forest", "Grassland",
                                                           "Savanna", "Shrubland", "Wetland"),
                                     Ecosystem_type, "Other"),
+           # vivid::pdpVars() below needs things as factors not char
            Ecosystem_type = as.factor(Ecosystem_type),
            Soil_type_name = as.factor(Soil_type_name)) ->
     dat_filtered
@@ -92,8 +96,7 @@ We have three potential independent variables:
 
 -   `Rs_growingseason` (mean growing season soil respiration)
 
-Their distributions are expected to be non-normal, which is a problem for
-linear models and not ideal for anything. Evaluate possible transformations.
+Their distributions are expected to be non-normal, which is a problem for linear models and not ideal for anything. Evaluate possible transformations.
 
 ```{r iv-dist}
 #| fig-width: 10
@@ -125,15 +128,14 @@ dat_filtered %>%
 
 We are using the `ranger` package.
 
-Wright, M. N. and Ziegler, A.: Ranger: A fast implementation of random forests
-for high dimensional data in C++ and R, J. Stat. Softw., 77, https://doi.org/10.18637/jss.v077.i01, 2017.
+Wright, M. N. and Ziegler, A.: Ranger: A fast implementation of random forests for high dimensional data in C++ and R, J. Stat. Softw., 77, https://doi.org/10.18637/jss.v077.i01, 2017.
 
 ```{r test-rf}
 #| fig-width: 10
 #| fig-height: 6
 
 # Fit random forest model and test against validation data
-# The i.v. is in the first column
+# The independent variable is in the first column
 fit_and_test_rf <- function(x_train, x_val) {
     f <- as.formula(paste(colnames(x_train)[1], "~ ."))
     rf <- ranger::ranger(formula = f, data = x_train, importance = "impurity")
@@ -153,54 +155,82 @@ fit_and_test_rf <- function(x_train, x_val) {
                 validation_r2 = validation_r2))
 }
 
+# Do a k-fold cross-validation
+# x = data; f = function to call; k = number of folds
+do_k_fold <- function(x, f, k = 10, quiet = TRUE) {
+    if(!all(complete.cases(x))) {
+        stop("x should not have any NAs at this stage!")
+    }
+    
+    groups <- sample.int(n = k, size = nrow(x), replace = TRUE)
+    training_r2 <- rep.int(NA_real_, k)
+    validation_r2 <- rep.int(NA_real_, k)
+    for(i in seq_len(k)) {
+        x_val <- x[groups == i,]
+        x_train <- x[groups != i,]
+        if(!quiet) {
+            message("\tk-fold ", i, ":")
+            message("\t\tTraining is ", nrow(x_train), " x ", ncol(x_train))
+            message("\t\tValidation is ", nrow(x_val), " x ", ncol(x_val))
+        }
+
+        out <- f(x_train = x_train, x_val = x_val)
+        training_r2[i] <- out$training_r2
+        validation_r2[i] <- out$validation_r2
+    }
+    tibble(k = seq_len(k), 
+           training_r2 = training_r2,
+           validation_r2 = validation_r2)
+} # do_k_fold
+
+# Base test dataset
 dat_filtered %>% 
-    # vivid::pdpVars() below needs things as factors not char
-    mutate(Ecosystem_type = as.factor(Ecosystem_type),
-           Soil_type_name = as.factor(Soil_type_name),
-           PBE = SPEI12_y1 <= -1 & SPEI12 > 0) %>% 
-    select(sqrt_Rs_annual, #Longitude, Latitude,
-           SPEI12, PBE, 
+    select(sqrt_Rs_annual,
            Tair, Tsoil_lev1, Tsoil_lev2,
            Precip, VWC_lev1, VWC_lev2, 
            LAI_high, LAI_low, Ecosystem_type,
            Veg_type_hi, Veg_type_low, Soil_type_name) %>% 
     filter(complete.cases(.)) -> 
-    test
+    dat_base_test
 
-message("The test complete-cases dataset has ", dim(test)[1],
-        " rows and ", dim(test)[2], " columns")
-message("Fitting all-data model")
-rf_all_data <- ranger(sqrt_Rs_annual ~ ., data = test, importance = "impurity")
+message("The test complete-cases dataset has ", dim(dat_base_test)[1],
+        " rows and ", dim(dat_base_test)[2], " columns")
+message("Full-data model performance:")
+rf_all_data <- ranger(sqrt_Rs_annual ~ ., data = dat_base_test, importance = "impurity")
 print(rf_all_data)
 
 imps <- sort(rf_all_data$variable.importance, decreasing = TRUE)
 
 # Top three variables...
-pdpVars(data = test, 
+pdpVars(data = dat_base_test, 
         fit = rf_all_data, 
         response = "sqrt_Rs_annual",
         vars = names(imps)[1:3])
 # ...and the next three
-pdpVars(data = test, 
+pdpVars(data = dat_base_test, 
         fit = rf_all_data, 
         response = "sqrt_Rs_annual",
         vars = names(imps)[4:6])
 
+message("k-fold cross-validation results:")
+do_k_fold(dat_base_test, fit_and_test_rf, k = K_FOLD) %>% 
+    summary()
 
-# Fit a model without PBE and compare
-rf_all_data_no_PBE <- ranger(sqrt_Rs_annual ~ ., 
-                             data = select(test, -PBE),
-                             importance = "impurity")
-
-tibble(model_with_PBE =rf_all_data$predictions,
-       model_without_PBE = rf_all_data_no_PBE$predictions,
-       PBE = test$PBE,
-       Ecosystem_type = test$Ecosystem_type) %>% 
-    ggplot(aes(model_without_PBE, model_with_PBE)) + 
-    geom_point(aes(color = PBE)) + 
-    geom_abline() + 
-    facet_wrap(~Ecosystem_type) +
-    ggtitle("Random Forest: effect of including PBE")
+# 
+# # Fit a model without PBE and compare
+# rf_all_data_no_PBE <- ranger(sqrt_Rs_annual ~ ., 
+#                              data = select(test, -PBE),
+#                              importance = "impurity")
+# 
+# tibble(model_with_PBE =rf_all_data$predictions,
+#        model_without_PBE = rf_all_data_no_PBE$predictions,
+#        PBE = test$PBE,
+#        Ecosystem_type = test$Ecosystem_type) %>% 
+#     ggplot(aes(model_without_PBE, model_with_PBE)) + 
+#     geom_point(aes(color = PBE)) + 
+#     geom_abline() + 
+#     facet_wrap(~Ecosystem_type) +
+#     ggtitle("Random Forest: effect of including PBE")
 ```
 
 ## How important are the MODIS data?
@@ -208,80 +238,29 @@ tibble(model_with_PBE =rf_all_data$predictions,
 The MODIS data only start in 2001 (see `gsbe-data-prep` output), so requiring them in a model cuts off a lot of early data – on the order of 20% of the dataset. Are they needed?
 
 ```{r test-modis}
+
 dat_filtered %>% 
     select(sqrt_Rs_annual,
-           Ecosystem_type, SPEI12, MODIS_NPP, MODIS_GPP,
-           Tair:LAI_high, Soil_type_name) %>% 
+           Tair, Tsoil_lev1, Tsoil_lev2,
+           Precip, VWC_lev1, VWC_lev2, 
+           LAI_high, LAI_low, Ecosystem_type,
+           MODIS_NPP, MODIS_GPP,
+           Veg_type_hi, Veg_type_low, Soil_type_name) %>% 
     filter(complete.cases(.)) -> 
-    test1
-rf_modis <- ranger(sqrt_Rs_annual ~ ., data = test1)
+    dat_base_test_modis
 
-dat_filtered %>% 
-    select(sqrt_Rs_annual, Longitude, Latitude,
-           Ecosystem_type, SPEI12, #MODIS_NPP, MODIS_GPP,
-           Tair:LAI_low, Soil_type_name) %>% 
-    filter(complete.cases(.)) -> 
-    test2
-rf_no_modis <- ranger(sqrt_Rs_annual ~ ., data = test1)
+rf_modis <- ranger(sqrt_Rs_annual ~ ., data = dat_base_test_modis, importance = "impurity")
+print(rf_modis)
 
 message("Model *with* MODIS data OOB R2 = ", round(rf_modis$r.squared, 4))
-message("Model *without* MODIS data OOB R2 = ", round(rf_no_modis$r.squared, 4))
-
+message("Model *without* MODIS data OOB R2 = ", round(rf_all_data$r.squared, 4))
 ```
 
 **Conclusion: it doesn't seem like they're needed.**
 
-## Conditional inference Random Forest
-
-> Recall the default splitting rule during random forests tree building consists of selecting, out of all splits of the (randomly selected *mtry*) candidate variables, the split that minimizes the Gini impurity (in the case of classification) and the SSE (in case of regression). **However, \[Strobl et al. (2007)\](**<https://doi.org/10.1186/1471-2105-8-25>**) illustrated that these default splitting rules favor the selection of features with many possible splits (e.g., continuous variables or categorical variables with many categories) over variables with fewer splits (the extreme case being binary variables, which have only one possible split).** Conditional inference trees (Hothorn, Hornik, and Zeileis 2006) implement an alternative splitting mechanism that helps to reduce this variable selection bias. However, ensembling conditional inference trees has yet to be proven superior with regards to predictive accuracy and they take a lot longer to train.
-
-From <https://bradleyboehmke.github.io/HOML/random-forest.html>.
-
-Our `PBE` flag is a binary variable, so is its importance being under-valued by `ranger`? Test a conditional inference tree-based forest:
-
-```{r conditional-inference}
-set.seed(123)
-training <- sample(nrow(test), 0.9 * nrow(test), replace = FALSE)
-m_ci <- cforest(sqrt_Rs_annual ~ ., data = test[training,])
-message("Variable importance of CI forest:")
-sort(varimp(m_ci), decreasing = TRUE)
-
-obs <- test[-training,]$sqrt_Rs_annual
-preds <- predict(m_ci, newdata = test[-training,])
-message("R2 against validation data = ", round(r2(preds = preds, obs = obs), 3))
-```
-
-**Conclusion: no evidence that conditional inference random forest produces different results.**
-
-## XGBoost
-
-What about it?
-
-```{r xgboost}
-set.seed(123)
-training <- sample(nrow(test), 0.9 * nrow(test), replace = FALSE)
-m_xgb <- m <- xgboost(test[training,-1], test$sqrt_Rs_annual[training])
-
-message("Variable importance of XGBoost model:")
-as_tibble(xgb.importance(m_xgb))
-
-obs <- test[-training,]$sqrt_Rs_annual
-preds <- predict(m_xgb, newdata = test[-training,])
-message("R2 against validation data = ", round(r2(preds = preds, obs = obs), 3))
-```
-
-Note however that
-
->Unlike random forests, GBMs can have high variability in accuracy dependent
-on their hyperparameter settings (Probst, Bischl, and Boulesteix 2018). So 
-tuning can require much more strategy than a random forest model.
-
-**Conclusion: performance and variable importance seem similar to `ranger`.**
-
 ## Test spatial Random Forest
 
-Spatial autocorrelation wouldn't change the fit of the model, but it could bias
-the variable importance metrics. Evaluate.
+Spatial autocorrelation wouldn't change the fit of the model, but it could bias the variable importance metrics. Evaluate.
 
 ```{r spatial-rf}
 
@@ -289,25 +268,64 @@ the variable importance metrics. Evaluate.
 # remotes::install_github(repo = "blasbenito/spatialRF",
 #   ref = "main", force = TRUE, quiet = TRUE)
 stopifnot(packageVersion("spatialRF") >= "1.1.5")
-
 dat_filtered %>% 
     select(sqrt_Rs_annual, Longitude, Latitude,
-           Ecosystem_type, SPEI12, #MODIS_NPP, MODIS_GPP,
-           Tair:LAI_low, Soil_type_name) %>% 
+           Tair, Tsoil_lev1, Tsoil_lev2,
+           Precip, VWC_lev1, VWC_lev2, 
+           LAI_high, LAI_low, Ecosystem_type,
+           Veg_type_hi, Veg_type_low, Soil_type_name) %>% 
     filter(complete.cases(.)) -> 
-    test
+    dat_spatial_test
 
 # Compute distance between all pairs of points
-dm <- geodist(select(test, Longitude, Latitude), measure = "geodesic")
-test$Longitude <- test$Latitude <- NULL
-
-rf_sp <- spatialRF::rf(data = test, 
-                       dependent.variable.name = colnames(test)[1],
-                       predictor.variable.names = setdiff(colnames(test), colnames(test)[1]),
-                       distance.matrix = dm)
+dm <- geodist(select(dat_spatial_test, Longitude, Latitude), measure = "geodesic")
+dat_spatial_test$Longitude <- dat_spatial_test$Latitude <- NULL
+predictors <- setdiff(colnames(dat_spatial_test), colnames(dat_spatial_test)[1])
+spatialRF::rf(data = dat_spatial_test, 
+              dependent.variable.name = colnames(dat_spatial_test)[1],
+              predictor.variable.names = predictors,
+              distance.matrix = dm)
 ```
 
 **Conclusion: no strong evidence of spatial autocorrelation.**
+
+## XGBoost
+
+Is there any reason to think that this popular algorithm would out-perform our Random Forest approach, and/or give different answers?
+
+```{r xgboost}
+fit_and_test_xgboost <- function(x_train, x_val) {
+    m_xgb <- xgboost(x_train[-1], x_train[1])
+    pred_train <- predict(m_xgb, newdata = x_train)
+    pred_val <- predict(m_xgb, newdata = x_val)
+    tibble(training_r2 = r2(pred_train, pull(x_train[1])),
+           validation_r2 = r2(pred_val, pull(x_val[1])))
+}
+
+m_xgb <- xgboost(dat_base_test[-1], dat_base_test[1])
+message("Variable importance of XGBoost model:")
+as_tibble(xgb.importance(m_xgb))
+
+message("k-fold cross-validation results:")
+do_k_fold(dat_base_test, fit_and_test_xgboost, k = K_FOLD) %>% 
+    summary()
+```
+
+Seems like xgboost is over-fitting to the training data. Note however that
+
+> Unlike random forests, GBMs can have high variability in accuracy dependent on their hyperparameter settings [(Probst, Bischl, and Boulesteix 2018)](https://arxiv.org/abs/1802.09596) So tuning can require much more strategy than a random forest model.
+
+**Conclusion: performance and variable importance seem similar to `ranger`.**
+
+# 1. Top predictive variablesPredictive value of SPEI
+
+# 2. Predictive value of previous-year SPEI
+
+# 3. Value of previous-year SPEI *after drought*
+
+Not clear what's happening here
+
+# 4. Testing for a Birch effect
 
 ## Linear model: PBE importance and interactions
 
@@ -601,11 +619,33 @@ out %>%
 
 -   **PBE significantly interacts with Tair (esp. in predicting Rs_annual), Tsoil, and VWC.**
 
-## 
+## Conditional inference Random Forest
 
--   TODO: try fitting a model with last year's SPEI but not PBE flag? broader test
+> Recall the default splitting rule during random forests tree building consists of selecting, out of all splits of the (randomly selected *mtry*) candidate variables, the split that minimizes the Gini impurity (in the case of classification) and the SSE (in case of regression). **However, \[Strobl et al. (2007)\](**<https://doi.org/10.1186/1471-2105-8-25>**) illustrated that these default splitting rules favor the selection of features with many possible splits (e.g., continuous variables or categorical variables with many categories) over variables with fewer splits (the extreme case being binary variables, which have only one possible split).** Conditional inference trees (Hothorn, Hornik, and Zeileis 2006) implement an alternative splitting mechanism that helps to reduce this variable selection bias. However, ensembling conditional inference trees has yet to be proven superior with regards to predictive accuracy and they take a lot longer to train.
 
-## Reproducibility
+From <https://bradleyboehmke.github.io/HOML/random-forest.html>.
+
+Our `PBE` flag is a binary variable, so is its importance being under-valued by `ranger`? Test a conditional inference tree-based forest:
+
+```{r conditional-inference}
+set.seed(123)
+training <- sample(nrow(test), 0.9 * nrow(test), replace = FALSE)
+m_ci <- cforest(sqrt_Rs_annual ~ ., data = test[training,])
+message("Variable importance of CI forest:")
+sort(varimp(m_ci), decreasing = TRUE)
+
+obs <- test[-training,]$sqrt_Rs_annual
+preds <- predict(m_ci, newdata = test[-training,])
+message("R2 against validation data = ", round(r2(preds = preds, obs = obs), 3))
+```
+
+**Conclusion: no evidence that conditional inference random forest produces different results.**
+
+# Summary
+
+Summary
+
+# Reproducibility
 
 ```{r reproducibility}
 #| echo: false

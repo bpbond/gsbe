@@ -43,35 +43,5 @@ era5_soil_veg <- read_parquet("data-ERA5/ERA5_soil_veg.parquet")
 
 ```{r}
 
-do_k_fold <- function(x, k = 10) {
-    if(!all(complete.cases(x))) {
-        stop("x should not have any NAs at this stage!")
-    }
-    
-    set.seed(123)
-    groups <- sample.int(n = k, size = nrow(x), replace = TRUE)
-    training_r2 <- rep.int(NA_real_, k)
-    validation_r2 <- rep.int(NA_real_, k)
-    for(i in seq_len(k)) {
-        x_val <- x[groups == i,]
-        x_train <- x[groups != i,]
-        message("\tk-fold ", i, ":")
-        message("\t\tTraining is ", nrow(x_train), " x ", ncol(x_train))
-        message("\t\tValidation is ", nrow(x_val), " x ", ncol(x_val))
-
-        rf_out <- fit_and_test_rf(x_train = x_train, x_val = x_val)
-        training_r2[i] <- rf_out$training_r2
-        validation_r2[i] <- rf_out$validation_r2
-        # message("\t\tTraining R2 = ", round(training_r2[i], 3))
-        # message("\t\tValidation R2 = ", round(validation_r2[i], 3))
-        
-        # Global predictions
-        
-    }
-    tibble(k = seq_len(k), 
-           training_r2 = training_r2,
-           validation_r2 = validation_r2)
-} # compute fit statistics using k-fold
-
 
 ```
