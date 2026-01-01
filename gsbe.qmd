@@ -222,6 +222,7 @@ dvs <- c("sqrt_Rs_annual", "sqrt_Rh_annual", "sqrt_Rs_growingseason")
 preds <- setdiff(colnames(dat_filtered_base_all), dvs)
 kf_out <- list()
 for(dv in dvs) {
+    # Construct dataset and do the k-fold
     x <- dat_filtered_base_all[c(dv, preds)]
     x <- x[complete.cases(x),]
     kf_out[[dv]] <- do_k_fold(x, fit_and_test_rf) %>% mutate(dv = dv, n = nrow(x))
@@ -358,8 +359,21 @@ par(mfrow = c(2, 2))
 plot(m_Rs_reduced)
 
 message("k-fold cross-validation results:")
-do_k_fold(dat_base_test, fit_and_test_lm, m = m_Rs) %>% 
-    summary()
+kf_out <- list()
+for(dv in dvs) {
+    # Pull out the rhs of the formula and paste dv (dependent variable) in front
+    f <- as.formula(paste(dv, "~", as.character(formula(m_Rs))[3]))
+    # Construct dataset and call lm() once to give us a base model
+    x <- dat_filtered_base_all[c(dv, preds)]
+    x <- x[complete.cases(x),]
+    m <- lm(f, data = x)
+    kf_out[[dv]] <- do_k_fold(x, f = fit_and_test_lm, m = m) %>% 
+        mutate(dv = dv, n = nrow(x))
+}
+bind_rows(kf_out) %>% 
+    group_by(dv) %>% 
+    summarise(across(everything(), mean)) %>% 
+    mutate(k = K_FOLD) # just so it's "10" or whatever as expected
 ```
 
 **Conclusions:**
