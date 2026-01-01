@@ -156,8 +156,8 @@ fit_and_test_rf <- function(x_train, x_val) {
 }
 
 # Do a k-fold cross-validation
-# x = data; f = function to call; k = number of folds
-do_k_fold <- function(x, f, k = 10, quiet = TRUE) {
+# x = data; f = function to call; k = number of folds; ... = params for model
+do_k_fold <- function(x, f, k = 10, quiet = TRUE, ...) {
     if(!all(complete.cases(x))) {
         stop("x should not have any NAs at this stage!")
     }
@@ -174,7 +174,7 @@ do_k_fold <- function(x, f, k = 10, quiet = TRUE) {
             message("\t\tValidation is ", nrow(x_val), " x ", ncol(x_val))
         }
 
-        out <- f(x_train = x_train, x_val = x_val)
+        out <- f(x_train = x_train, x_val = x_val, ...)
         training_r2[i] <- out$training_r2
         validation_r2[i] <- out$validation_r2
     }
@@ -238,7 +238,6 @@ do_k_fold(dat_base_test, fit_and_test_rf, k = K_FOLD) %>%
 The MODIS data only start in 2001 (see `gsbe-data-prep` output), so requiring them in a model cuts off a lot of early data – on the order of 20% of the dataset. Are they needed?
 
 ```{r test-modis}
-
 dat_filtered %>% 
     select(sqrt_Rs_annual,
            Tair, Tsoil_lev1, Tsoil_lev2,
@@ -263,7 +262,6 @@ message("Model *without* MODIS data OOB R2 = ", round(rf_all_data$r.squared, 4))
 Spatial autocorrelation wouldn't change the fit of the model, but it could bias the variable importance metrics. Evaluate.
 
 ```{r spatial-rf}
-
 # This needs the newest version 1.1.5, not yet on CRAN
 # remotes::install_github(repo = "blasbenito/spatialRF",
 #   ref = "main", force = TRUE, quiet = TRUE)
@@ -313,11 +311,50 @@ do_k_fold(dat_base_test, fit_and_test_xgboost, k = K_FOLD) %>%
 
 Seems like xgboost is over-fitting to the training data. Note however that
 
-> Unlike random forests, GBMs can have high variability in accuracy dependent on their hyperparameter settings [(Probst, Bischl, and Boulesteix 2018)](https://arxiv.org/abs/1802.09596) So tuning can require much more strategy than a random forest model.
+> Unlike random forests, GBMs can have high variability in accuracy dependent
+on their hyperparameter settings [(Probst, Bischl, and Boulesteix 2018)](https://arxiv.org/abs/1802.09596) So tuning can require much more 
+strategy than a random forest model.
 
 **Conclusion: performance and variable importance seem similar to `ranger`.**
 
-# 1. Top predictive variablesPredictive value of SPEI
+## Linear regression model: performance
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+
+# Fit random forest model and test against validation data
+# The independent variable is in the first column
+fit_and_test_lm <- function(x_train, x_val, m) {
+    pred_train <- predict(m, newdata = x_train)
+    pred_val <- predict(m, newdata = x_val)
+    tibble(training_r2 = r2(pred_train, pull(x_train[1])),
+           validation_r2 = r2(pred_val, pull(x_val[1])))
+}
+
+message("Fitting Rs_annual linear model...")
+m_Rs <- lm(sqrt_Rs_annual ~ Tair + Tsoil_lev1 + Tsoil_lev2 +
+            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2) +
+            Ecosystem_type + LAI_high * LAI_low + 
+            Veg_type_hi + Veg_type_low + Soil_type_name,
+        data = dat_base_test)
+m_Rs_reduced <- MASS::stepAIC(m_Rs, trace = FALSE)
+summary(m_Rs_reduced)
+par(mfrow = c(2, 2))
+plot(m_Rs_reduced)
+
+message("k-fold cross-validation results:")
+do_k_fold(dat_base_test, fit_and_test_lm, k = K_FOLD, m = m_Rs) %>% 
+    summary()
+```
+
+**Conclusions:**
+
+- **Linear model performance is less than half of Random Forest**
+
+- **Variable importance is similar**
+
+# 1. Predictive value of SPEI
 
 # 2. Predictive value of previous-year SPEI
 
