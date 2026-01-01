@@ -4,6 +4,43 @@ format: html
 editor: visual
 ---
 
+```{r setup}
+#| include: false
+
+# Data processing and visualization packages
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+theme_set(theme_bw())
+library(readr)
+library(arrow)
+
+# Main analysis packages
+library(ranger)
+library(broom)
+
+source("helpers.R")
+```
+
+## Read data
+
+```{r read-data}
+
+# Data that we will build the model from
+data_file <- "rf_dat_filtered.parquet"
+message("Reading ", data_file)
+dat_filtered <- read_parquet(data_file)
+
+# Global driving data
+era5 <- read_parquet("data-ERA5/ERA5_1985.parquet")
+era5_soil_veg <- read_parquet("data-ERA5/ERA5_soil_veg.parquet")
+#spei <- read_parquet("data-spei/")
+#era5_tvh <- read_parquet("data-ERA5/")
+#era5_tvl <- read_parquet("data-ERA5/ERA5_soil_type.grib")
+```
+
+## k-fold
+
 ```{r}
 
 do_k_fold <- function(x, k = 10) {
@@ -18,16 +55,18 @@ do_k_fold <- function(x, k = 10) {
     for(i in seq_len(k)) {
         x_val <- x[groups == i,]
         x_train <- x[groups != i,]
-        # message("\tk-fold ", i, ":")
-        # message("\t\tTraining is ", nrow(x_train), " x ", ncol(x_train))
-        # message("\t\tValidation is ", nrow(x_val), " x ", ncol(x_val))
+        message("\tk-fold ", i, ":")
+        message("\t\tTraining is ", nrow(x_train), " x ", ncol(x_train))
+        message("\t\tValidation is ", nrow(x_val), " x ", ncol(x_val))
 
         rf_out <- fit_and_test_rf(x_train = x_train, x_val = x_val)
         training_r2[i] <- rf_out$training_r2
         validation_r2[i] <- rf_out$validation_r2
-        
         # message("\t\tTraining R2 = ", round(training_r2[i], 3))
         # message("\t\tValidation R2 = ", round(validation_r2[i], 3))
+        
+        # Global predictions
+        
     }
     tibble(k = seq_len(k), 
            training_r2 = training_r2,
