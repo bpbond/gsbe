@@ -42,6 +42,9 @@ r2 <- function(preds, obs) {
     tss <- sum((obs - mean(obs)) ^ 2)
     return(1 - rss / tss)
 }
+# Utility function: extract and round linear model R2
+lm_r2 <- function(m) round(summary(m)$adj.r.squared, 4)
+
 ```
 
 # Background and science questions
@@ -129,7 +132,7 @@ We are using the `ranger` package.
 
 Wright, M. N. and Ziegler, A.: Ranger: A fast implementation of random forests for high dimensional data in C++ and R, J. Stat. Softw., 77, https://doi.org/10.18637/jss.v077.i01, 2017.
 
-```{r test-rf}
+```{r base-rf}
 #| fig-width: 10
 #| fig-height: 6
 
@@ -188,29 +191,37 @@ dat_filtered %>%
            Tair, Tsoil_lev1, Tsoil_lev2,
            Precip, VWC_lev1, VWC_lev2, 
            LAI_high, LAI_low, Ecosystem_type,
+           starts_with("SPEI"),
+           MODIS_NPP, MODIS_GPP,
            Veg_type_hi, Veg_type_low, Soil_type_name) ->
-    dat_filtered_base_all 
+    dat_base_all
+
+# Base test dataset without MODIS or SPEI data
+dat_base_all %>% 
+    select(-MODIS_NPP, -MODIS_GPP, -starts_with("SPEI")) ->
+    dat_base_no_modispei
+
 # Base test dataset (Rs_annual)
-dat_filtered_base_all %>% 
+dat_base_no_modispei %>% 
     select(-sqrt_Rh_annual, -sqrt_Rs_growingseason) %>% 
     filter(complete.cases(.)) -> 
-    dat_base_test
+    dat_base_Rs_annual
 
-message("The test complete-cases dataset has ", dim(dat_base_test)[1],
-        " rows and ", dim(dat_base_test)[2], " columns")
+message("The test complete-cases dataset has ", dim(dat_base_Rs_annual)[1],
+        " rows and ", dim(dat_base_Rs_annual)[2], " columns")
 message("Full-data model performance:")
-rf_all_data <- ranger(sqrt_Rs_annual ~ ., data = dat_base_test, importance = "impurity")
+rf_all_data <- ranger(sqrt_Rs_annual ~ ., data = dat_base_Rs_annual, importance = "impurity")
 print(rf_all_data)
 
 imps <- sort(rf_all_data$variable.importance, decreasing = TRUE)
 
 # Top three variables...
-pdpVars(data = dat_base_test, 
+pdpVars(data = dat_base_Rs_annual, 
         fit = rf_all_data, 
         response = "sqrt_Rs_annual",
         vars = names(imps)[1:3])
 # ...and the next three
-pdpVars(data = dat_base_test, 
+pdpVars(data = dat_base_Rs_annual, 
         fit = rf_all_data, 
         response = "sqrt_Rs_annual",
         vars = names(imps)[4:6])
@@ -219,11 +230,11 @@ pdpVars(data = dat_base_test,
 message("k-fold cross-validation:")
 
 dvs <- c("sqrt_Rs_annual", "sqrt_Rh_annual", "sqrt_Rs_growingseason")
-preds <- setdiff(colnames(dat_filtered_base_all), dvs)
+preds <- setdiff(colnames(dat_base_no_modispei), dvs)
 kf_out <- list()
 for(dv in dvs) {
     # Construct dataset and do the k-fold
-    x <- dat_filtered_base_all[c(dv, preds)]
+    x <- dat_base_no_modispei[c(dv, preds)]
     x <- x[complete.cases(x),]
     kf_out[[dv]] <- do_k_fold(x, fit_and_test_rf) %>% mutate(dv = dv, n = nrow(x))
 }
@@ -253,21 +264,16 @@ bind_rows(kf_out) %>%
 The MODIS data only start in 2001 (see `gsbe-data-prep` output), so requiring them in a model cuts off a lot of early data – on the order of 20% of the dataset. Are they needed?
 
 ```{r test-modis}
-dat_filtered %>% 
-    select(sqrt_Rs_annual,
-           Tair, Tsoil_lev1, Tsoil_lev2,
-           Precip, VWC_lev1, VWC_lev2, 
-           LAI_high, LAI_low, Ecosystem_type,
-           MODIS_NPP, MODIS_GPP,
-           Veg_type_hi, Veg_type_low, Soil_type_name) %>% 
+dat_base_all %>% 
+    select(-sqrt_Rh_annual, -sqrt_Rs_growingseason, -starts_with("SPEI")) %>% 
     filter(complete.cases(.)) -> 
     dat_base_test_modis
 
 rf_modis <- ranger(sqrt_Rs_annual ~ ., data = dat_base_test_modis, importance = "impurity")
 print(rf_modis)
 
-message("Model *with* MODIS data OOB R2 = ", round(rf_modis$r.squared, 4))
-message("Model *without* MODIS data OOB R2 = ", round(rf_all_data$r.squared, 4))
+message("Model *with* MODIS data: OOB R2 = ", round(rf_modis$r.squared, 4))
+message("Model *without* MODIS data: OOB R2 = ", round(rf_all_data$r.squared, 4))
 ```
 
 **Conclusion: it doesn't seem like they're needed.**
@@ -281,12 +287,10 @@ Spatial autocorrelation wouldn't change the fit of the model, but it could bias 
 # remotes::install_github(repo = "blasbenito/spatialRF",
 #   ref = "main", force = TRUE, quiet = TRUE)
 stopifnot(packageVersion("spatialRF") >= "1.1.5")
-dat_filtered %>% 
-    select(sqrt_Rs_annual, Longitude, Latitude,
-           Tair, Tsoil_lev1, Tsoil_lev2,
-           Precip, VWC_lev1, VWC_lev2, 
-           LAI_high, LAI_low, Ecosystem_type,
-           Veg_type_hi, Veg_type_low, Soil_type_name) %>% 
+
+dat_base_no_modispei %>% 
+    bind_cols(select(dat_filtered, Longitude, Latitude)) %>% 
+    select(-sqrt_Rh_annual, -sqrt_Rs_growingseason) %>% 
     filter(complete.cases(.)) -> 
     dat_spatial_test
 
@@ -315,12 +319,12 @@ fit_and_test_xgboost <- function(x_train, x_val) {
            validation_r2 = r2(pred_val, pull(x_val[1])))
 }
 
-m_xgb <- xgboost(dat_base_test[-1], dat_base_test[1])
+m_xgb <- xgboost(dat_base_Rs_annual[-1], dat_base_Rs_annual[1])
 message("Variable importance of XGBoost model:")
 as_tibble(xgb.importance(m_xgb))
 
 message("k-fold cross-validation results:")
-do_k_fold(dat_base_test, fit_and_test_xgboost) %>% 
+do_k_fold(dat_base_Rs_annual, fit_and_test_xgboost) %>% 
     summary()
 ```
 
@@ -334,7 +338,7 @@ strategy than a random forest model.
 
 ## Linear regression model: performance
 
-```{r}
+```{r base-lm}
 #| fig-width: 10
 #| fig-height: 6
 
@@ -352,19 +356,20 @@ m_Rs <- lm(sqrt_Rs_annual ~ Tair + Tsoil_lev1 + Tsoil_lev2 +
             VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2) +
             Ecosystem_type + LAI_high * LAI_low + 
             Veg_type_hi + Veg_type_low + Soil_type_name,
-        data = dat_base_test)
+        data = dat_base_Rs_annual)
 m_Rs_reduced <- MASS::stepAIC(m_Rs, trace = FALSE)
 summary(m_Rs_reduced)
 par(mfrow = c(2, 2))
 plot(m_Rs_reduced)
 
 message("k-fold cross-validation results:")
+lm_rhs_formula <- as.character(formula(m_Rs))[3]
 kf_out <- list()
 for(dv in dvs) {
     # Pull out the rhs of the formula and paste dv (dependent variable) in front
-    f <- as.formula(paste(dv, "~", as.character(formula(m_Rs))[3]))
+    f <- as.formula(paste(dv, "~", lm_rhs_formula))
     # Construct dataset and call lm() once to give us a base model
-    x <- dat_filtered_base_all[c(dv, preds)]
+    x <- dat_base_no_modispei[c(dv, preds)]
     x <- x[complete.cases(x),]
     m <- lm(f, data = x)
     kf_out[[dv]] <- do_k_fold(x, f = fit_and_test_lm, m = m) %>% 
@@ -384,6 +389,45 @@ bind_rows(kf_out) %>%
 
 # 1. Predictive value of SPEI
 
+```{r spei-value}
+
+dat_base_all %>% 
+    select(-sqrt_Rh_annual, -sqrt_Rs_growingseason,
+           -MODIS_NPP, -MODIS_GPP) %>% 
+    filter(complete.cases(.)) -> 
+    dat_test_spei
+
+# remove the "_y1" columns
+yr1cols <- grep("_y1$", colnames(dat_test_spei))
+dat_test_spei <- dat_test_spei[-yr1cols]
+
+message("Testing Random Forest...")
+rf_spei <- ranger(sqrt_Rs_annual ~ ., data = dat_test_spei, importance = "impurity")
+print(rf_spei)
+sort(importance(rf_spei))
+
+message("Model *with* SPEI data: OOB R2 = ", round(rf_spei$r.squared, 4))
+message("Model *without* SPEI data: OOB R2 = ", round(rf_all_data$r.squared, 4))
+
+message("Testing linear model...")
+m_Rs_spei <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
+            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * 
+               (SPEI12 + SPEI24) +
+            Ecosystem_type + LAI_high * LAI_low + 
+            Veg_type_hi + Veg_type_low + Soil_type_name,
+        data = dat_test_spei)
+m_Rs_spei_reduced <- MASS::stepAIC(m_Rs_spei, trace = FALSE)
+summary(m_Rs_spei_reduced)
+
+message("Model *with* SPEI data: training R2 = ", lm_r2(m_Rs_spei_reduced))
+message("Model *without* SPEI data: training R2 = ", lm_r2(m_Rs_reduced))
+```
+**Conclusions:**
+
+- **SPEI impact on Random Forest model is...unclear. Performance doesn't change.**
+
+- **SPEI _does_ have effects in the linear model: significant interactions with many variables, and model R2 jumps modestly.**
+
 # 2. Predictive value of previous-year SPEI
 
 # 3. Value of previous-year SPEI *after drought*
@@ -397,6 +441,7 @@ Not clear what's happening here
 ```{r test-linear}
 #| fig-width: 10
 #| fig-height: 6
+#| eval: false
 
 dat_filtered %>% 
     mutate(PBE = SPEI12_y1 <= -1 & SPEI12 > 0,
@@ -476,6 +521,7 @@ PBE_interactions %>%
 ## PBE sensitivity test
 
 ```{r sensitivity-test}
+#| eval: false
 
 fit_and_test_lm <- function(x_train, x_val) {
     f <- as.formula(paste(colnames(x_train)[1], "~ (Tair + Tsoil_lev1 + Tsoil_lev2 +",
@@ -612,6 +658,7 @@ out_smry %>%
 ## Random Forest sensitivity results
 
 ```{r rf-sensitivity}
+#| eval: false
 
 # Table: Training R2 values
 out_smry %>%
@@ -652,6 +699,8 @@ out_ranked %>%
 ## Linear model sensitivity results
 
 ```{r lm-sensitivity}
+#| eval: false
+
 # Table: Training R2 values
 out_smry %>%
     filter(model == "lm") %>% 
@@ -693,6 +742,8 @@ From <https://bradleyboehmke.github.io/HOML/random-forest.html>.
 Our `PBE` flag is a binary variable, so is its importance being under-valued by `ranger`? Test a conditional inference tree-based forest:
 
 ```{r conditional-inference}
+#| eval: false
+
 set.seed(123)
 training <- sample(nrow(test), 0.9 * nrow(test), replace = FALSE)
 m_ci <- cforest(sqrt_Rs_annual ~ ., data = test[training,])
