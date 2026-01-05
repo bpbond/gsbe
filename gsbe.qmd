@@ -306,7 +306,7 @@ spatialRF::rf(data = dat_spatial_test,
 
 **Conclusion: no strong evidence of spatial autocorrelation.**
 
-## XGBoost
+## Test XGBoost
 
 Is there any reason to think that this popular algorithm would out-perform our Random Forest approach, and/or give different answers?
 
@@ -330,9 +330,7 @@ do_k_fold(dat_base_Rs_annual, fit_and_test_xgboost) %>%
 
 Seems like xgboost is over-fitting to the training data. Note however that
 
-> Unlike random forests, GBMs can have high variability in accuracy dependent
-on their hyperparameter settings [(Probst, Bischl, and Boulesteix 2018)](https://arxiv.org/abs/1802.09596) So tuning can require much more 
-strategy than a random forest model.
+> Unlike random forests, GBMs can have high variability in accuracy dependent on their hyperparameter settings [(Probst, Bischl, and Boulesteix 2018)](https://arxiv.org/abs/1802.09596) So tuning can require much more strategy than a random forest model.
 
 **Conclusion: performance and variable importance seem similar to `ranger`.**
 
@@ -383,9 +381,9 @@ bind_rows(kf_out) %>%
 
 **Conclusions:**
 
-- **Linear model performance is less than half of Random Forest**
+-   **Linear model performance is less than half of Random Forest**
 
-- **Variable importance is similar**
+-   **Variable importance is similar**
 
 # 1. Predictive value of SPEI
 
@@ -422,11 +420,12 @@ summary(m_Rs_spei_reduced)
 message("Model *with* SPEI data: training R2 = ", lm_r2(m_Rs_spei_reduced))
 message("Model *without* SPEI data: training R2 = ", lm_r2(m_Rs_reduced))
 ```
+
 **Conclusions:**
 
-- **SPEI impact on Random Forest model is...unclear. Performance doesn't change.**
+-   **SPEI impact on Random Forest model is...unclear. Performance doesn't change.**
 
-- **SPEI _does_ have effects in the linear model: significant interactions with many variables, and model R2 jumps modestly.**
+-   **SPEI *does* have effects in the linear model: significant interactions with many variables, and model R2 jumps modestly.**
 
 # 2. Predictive value of previous-year SPEI
 

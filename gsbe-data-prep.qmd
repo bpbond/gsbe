@@ -33,10 +33,11 @@ The Soil Respiration Database (SRBD) is described by [Jian et al. (2021)](https:
 #| fig-width: 12
 
 read_csv("data-srdb/srdb-data.csv", show_col_types = FALSE) %>% 
-    select(Author, Study_midyear, YearsOfData, 
+    select(Study_number, Author, Study_midyear, YearsOfData, 
            Latitude, Longitude, Elevation, Manipulation, 
            Biome, Ecosystem_type, Ecosystem_state, 
            Rs_annual, Rh_annual, Rs_growingseason) %>% 
+    filter(Ecosystem_type != "Agriculture") %>% 
     filter(!is.na(Longitude), !is.na(Latitude), !is.na(Study_midyear)) %>% 
     filter(!is.na(Rs_growingseason) | !is.na(Rs_annual) | !is.na(Rh_annual)) %>% 
     filter(Manipulation == "None") %>% 
