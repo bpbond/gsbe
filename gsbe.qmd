@@ -279,7 +279,9 @@ message("Model *without* MODIS data: OOB R2 = ", round(rf_all_data$r.squared, 4)
 
 **Conclusion: it doesn't seem like they're needed.**
 
-## Test spatial Random Forest
+## Roads not taken
+
+### Test spatial Random Forest
 
 Spatial autocorrelation wouldn't change the fit of the model, but it could bias the variable importance metrics. Evaluate.
 
@@ -307,7 +309,7 @@ spatialRF::rf(data = dat_spatial_test,
 
 **Conclusion: no strong evidence of spatial autocorrelation.**
 
-## Test XGBoost
+### Test XGBoost
 
 Is there any reason to think that this popular algorithm would out-perform our Random Forest approach, and/or give different answers?
 
@@ -335,10 +337,10 @@ Seems like xgboost is over-fitting to the training data. Note however that
 
 **Conclusion: performance and variable importance seem similar to `ranger`.**
 
-## Test neural network
+### Test neural network
 
-We use the `neuralnet` package for this. I experimented with
-the hidden layer and threshold settings to find a topology that
+We use the `neuralnet` package for this. I experimented with the
+hidden layer topology and threshold settings to find a configuration that
 reliably converges with these data. Note: fitting this is _slow_.
 
 ```{r neuralnet}
@@ -369,7 +371,9 @@ for(col in names(fcts)[fcts]) x[col] <- as.numeric(pull(x[col]))
 
 # Overall model
 m_nn <- neuralnet(sqrt_Rs_annual ~ ., data = x, hidden = c(12, 6), rep = 2, threshold = 0.4)
-message("R2 of overall model: ", round(r2(predict(m_nn, newdata = x), x$sqrt_Rs_annual), 3))
+message("R2 of two-layer model: ", round(r2(predict(m_nn, newdata = x), x$sqrt_Rs_annual), 3))
+m_nn <- neuralnet(sqrt_Rs_annual ~ ., data = x, hidden = c(24, 12, 6), rep = 2, threshold = 0.4)
+message("R2 of three-layer model: ", round(r2(predict(m_nn, newdata = x), x$sqrt_Rs_annual), 3))
 
 message("k-fold cross-validation results:")
 do_k_fold(x, fit_and_test_nn, k = 10) %>% 
