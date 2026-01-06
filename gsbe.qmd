@@ -425,7 +425,7 @@ message("Model *without* SPEI data: training R2 = ", lm_r2(m_Rs_reduced))
 
 **Conclusions:**
 
--   **SPEI impact on Random Forest model is...unclear. Performance doesn't change.**
+-   **SPEI impact on Random Forest model is...unclear. Small performance improvement.**
 
 -   **SPEI *does* have effects in the linear model: significant interactions with many variables, and model R2 jumps modestly.**
 
@@ -455,7 +455,14 @@ summary(m_Rs_spei_y1_reduced)
 
 message("Model *with* previous-year SPEI data: training R2 = ", lm_r2(m_Rs_spei_y1_reduced))
 message("Model *without* previous-year SPEI data: training R2 = ", lm_r2(m_Rs_spei_reduced))
+
 ```
+
+**Conclusions:**
+
+-   **SPEI_y1 impact on Random Forest model is...unclear. No performance improvement.**
+
+-   **SPEI_y1 has significant interactions with many variables in the linear model, and model R2 increases slightly.**
 
 # 3. Value of previous-year SPEI *after drought*
 
