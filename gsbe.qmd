@@ -80,7 +80,8 @@ dat %>%
     mutate(Ecosystem_type = if_else(Ecosystem_type %in% c("Desert", "Forest", "Grassland",
                                                           "Savanna", "Shrubland", "Wetland"),
                                     true = Ecosystem_type, 
-                                    false = "Other"),
+                                    false = "Other",
+                                    missing = "Other"),
            # vivid::pdpVars() below needs things as factors not char
            Ecosystem_type = as.factor(Ecosystem_type),
            Soil_type_name = as.factor(Soil_type_name)) ->
@@ -391,18 +392,19 @@ bind_rows(kf_out) %>%
 
 dat_base_all %>% 
     select(-sqrt_Rh_annual, -sqrt_Rs_growingseason,
-           -MODIS_NPP, -MODIS_GPP) %>% 
+           -MODIS_NPP, -MODIS_GPP,
+           -starts_with("SPEI24")) %>% 
     filter(complete.cases(.)) -> 
     dat_test_spei
 
 # remove the "_y1" columns
 yr1cols <- grep("_y1$", colnames(dat_test_spei))
-dat_test_spei <- dat_test_spei[-yr1cols]
+dat_test_spei_current <- dat_test_spei[-yr1cols]
 
 message("Testing Random Forest...")
-rf_spei <- ranger(sqrt_Rs_annual ~ ., data = dat_test_spei, importance = "impurity")
+rf_spei <- ranger(sqrt_Rs_annual ~ ., data = dat_test_spei_current, importance = "impurity")
 print(rf_spei)
-sort(importance(rf_spei))
+sort(desc(importance(rf_spei)))
 
 message("Model *with* SPEI data: OOB R2 = ", round(rf_spei$r.squared, 4))
 message("Model *without* SPEI data: OOB R2 = ", round(rf_all_data$r.squared, 4))
@@ -410,10 +412,10 @@ message("Model *without* SPEI data: OOB R2 = ", round(rf_all_data$r.squared, 4))
 message("Testing linear model...")
 m_Rs_spei <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
             VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * 
-               (SPEI12 + SPEI24) +
+               SPEI12 +
             Ecosystem_type + LAI_high * LAI_low + 
             Veg_type_hi + Veg_type_low + Soil_type_name,
-        data = dat_test_spei)
+        data = dat_test_spei_current)
 m_Rs_spei_reduced <- MASS::stepAIC(m_Rs_spei, trace = FALSE)
 summary(m_Rs_spei_reduced)
 
@@ -428,6 +430,32 @@ message("Model *without* SPEI data: training R2 = ", lm_r2(m_Rs_reduced))
 -   **SPEI *does* have effects in the linear model: significant interactions with many variables, and model R2 jumps modestly.**
 
 # 2. Predictive value of previous-year SPEI
+
+```{r prev-spei-value}
+
+# Use the dat_test_spei dataset from above
+
+message("Testing Random Forest...")
+rf_spei_y1 <- ranger(sqrt_Rs_annual ~ ., data = dat_test_spei, importance = "impurity")
+print(rf_spei_y1)
+sort(desc(importance(rf_spei_y1)))
+
+message("Model *with* previous-year SPEI data: OOB R2 = ", round(rf_spei_y1$r.squared, 4))
+message("Model *without* previous-year SPEI data: OOB R2 = ", round(rf_all_data$r.squared, 4))
+
+message("Testing linear model...")
+m_Rs_spei_y1 <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
+            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * 
+               (SPEI12 + SPEI12_y1) +
+            Ecosystem_type + LAI_high * LAI_low + 
+            Veg_type_hi + Veg_type_low + Soil_type_name,
+        data = dat_test_spei)
+m_Rs_spei_y1_reduced <- MASS::stepAIC(m_Rs_spei_y1, trace = FALSE)
+summary(m_Rs_spei_y1_reduced)
+
+message("Model *with* previous-year SPEI data: training R2 = ", lm_r2(m_Rs_spei_y1_reduced))
+message("Model *without* previous-year SPEI data: training R2 = ", lm_r2(m_Rs_spei_reduced))
+```
 
 # 3. Value of previous-year SPEI *after drought*
 
