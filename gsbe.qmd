@@ -378,6 +378,17 @@ bind_rows(kf_out) %>%
     group_by(dv) %>% 
     summarise(across(everything(), mean)) %>% 
     mutate(k = K_FOLD) # just so it's "10" or whatever as expected
+
+# Directly compare lm and rf predictions
+tibble(Ecosystem_type = dat_base_Rs_annual$Ecosystem_type,
+       lm_prediction = predict(m_Rs_reduced),
+       rf_prediction = predict(rf_all_data, data = dat_base_Rs_annual)$predictions) %>% 
+    ggplot(aes(lm_prediction, rf_prediction)) + 
+    geom_point(alpha = 0.25) + 
+    geom_abline() + 
+    geom_smooth(method = "lm", formula = y ~ x) +
+    ggtitle("Linear model versus Random Forest predictions") + 
+    facet_wrap(~Ecosystem_type, scales = "free")
 ```
 
 **Conclusions:**
