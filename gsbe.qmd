@@ -44,7 +44,8 @@ r2 <- function(preds, obs) {
 }
 # Utility function: extract and round linear model R2
 lm_r2 <- function(m) round(summary(m)$adj.r.squared, 4)
-
+# Utility function: ANOVA comparison of two linear models
+anova_p_twomodels <- function(m1, m2) round(anova(m1, m2)$`Pr(>F)`[2], 4)
 ```
 
 # Background and science questions
@@ -482,13 +483,15 @@ summary(m_Rs_spei_reduced)
 
 message("Model *with* SPEI data: training R2 = ", lm_r2(m_Rs_spei_reduced))
 message("Model *without* SPEI data: training R2 = ", lm_r2(m_Rs_reduced))
+message("ANOVA model comparison p-value: ", 
+        anova_p_twomodels(m_Rs_spei_reduced, m_Rs_reduced))
 ```
 
 **Conclusions:**
 
 -   **SPEI impact on Random Forest model is...unclear. Small performance improvement.**
 
--   **SPEI *does* have effects in the linear model: significant interactions with many variables, and model R2 jumps modestly.**
+-   **SPEI *does* have effects in the linear model: significant interactions with many variables, significant difference between models with and without SPEI, and model R2 jumps modestly.**
 
 # 2. Predictive value of previous-year SPEI
 
@@ -516,7 +519,37 @@ summary(m_Rs_spei_y1_reduced)
 
 message("Model *with* previous-year SPEI data: training R2 = ", lm_r2(m_Rs_spei_y1_reduced))
 message("Model *without* previous-year SPEI data: training R2 = ", lm_r2(m_Rs_spei_reduced))
+message("ANOVA model comparison p-value: ", 
+        anova_p_twomodels(m_Rs_spei_y1_reduced, m_Rs_spei_reduced))
+```
 
+**BUT there's a problem with the above.** Fit a model with _random_ 
+previous-year SPEI data:
+
+```{r random-speiyr1}
+dat_test_spei %>% 
+    mutate(SPEI12_y1 = runif(n())) ->
+    dat_test_spei_random
+
+m_spei_random1 <- lm(formula(m_Rs_spei_y1), data = dat_test_spei_random)
+m_spei_random1_reduced <- MASS::stepAIC(m_spei_random1, trace = FALSE)
+summary(m_spei_random1_reduced)
+```
+
+...and some of the `SPEI_yr1` terms might still be significant, just by chance!
+
+Use an ANOVA to compare the (reduced) models with and without previous-year SPEI:
+
+```{r random-speiyr1-anova}
+m_spei_random2 <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
+            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * 
+               (SPEI12) +
+            Ecosystem_type + LAI_high * LAI_low + 
+            Veg_type_hi + Veg_type_low + Soil_type_name,
+        data = dat_test_spei_random)
+m_spei_random2_reduced <- MASS::stepAIC(m_spei_random2, trace = FALSE)
+
+anova(m_spei_random1_reduced, m_spei_random2_reduced)
 ```
 
 **Conclusions:**
@@ -525,9 +558,56 @@ message("Model *without* previous-year SPEI data: training R2 = ", lm_r2(m_Rs_sp
 
 -   **SPEI_y1 has significant interactions with many variables in the linear model, and model R2 increases slightly.**
 
+-   **Need to be careful to include null model testing.**
+
 # 3. Value of previous-year SPEI *after drought*
 
-Not clear what's happening here
+For post-drought (PBE TRUE) observations, is SPEI_yr1 significant?
+
+For this we compute a "potential Birch Effect" flag `PBE`: TRUE when
+(i) the current year has SPEI >=0 (non-drought) and 
+(ii) the previous year had SPEI <= 1 (drought).
+
+```{r post-drought-spei}
+#| eval: false
+
+dat_test_spei %>% 
+    mutate(PBE = SPEI12 >= 0 & SPEI12_y1 <= -1) %>% 
+    filter(PBE) ->
+    dat_test_pbe
+
+m_pbe <- lm(formula = formula(m_Rs_spei_y1), data = dat_test_pbe)
+m_pbe_reduced <- MASS::stepAIC(m_pbe, trace = FALSE)
+summary(m_pbe_reduced)
+```
+
+Null test: is previous-year SPEI significant if conditions were similar, 
+i.e. no drought the previous year?
+
+```{r null-no-change}
+#| eval: false
+
+dat_test_spei %>% 
+    filter(SPEI12 > 0, SPEI12 < 0.5, SPEI12_y1 > 0, SPEI12_y1 < 0.5) ->
+    dat_test_no_spei_change
+
+m_no_change <- lm(formula = formula(m_Rs_spei_y1), data = dat_test_no_spei_change)
+m_no_change_reduced <- MASS::stepAIC(m_no_change, trace = FALSE)
+summary(m_no_change_reduced)
+```
+
+Null test: random `SPEI_yr1`.
+
+```{r null-random}
+dat_test_spei %>% 
+    mutate(SPEI12_y1 = runif(n())) ->
+    dat_test_random_speiy1
+
+m_random <- lm(formula = formula(m_Rs_spei_y1), data = dat_test_random_speiy1)
+m_random_reduced <- MASS::stepAIC(m_random, trace = FALSE)
+summary(m_random_reduced)
+```
+
 
 # 4. Testing for a Birch effect
 
