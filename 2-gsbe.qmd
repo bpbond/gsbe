@@ -482,7 +482,7 @@ message("ANOVA model comparison p-value: ",
 
 **Conclusions:**
 
--   **SPEI impact on Random Forest model is...unclear. Small performance improvement.**
+-   **SPEI impact on Random Forest model is small, but there is a performance improvement.**
 
 -   **SPEI *does* have effects in the linear model: significant interactions with many variables, significant difference between models with and without SPEI, and model R2 jumps modestly.**
 
@@ -548,54 +548,63 @@ anova(m_spei_random1_reduced, m_spei_random2_reduced)
 
 -   **SPEI_y1 impact on Random Forest model is...unclear. No performance improvement.**
 
--   **SPEI_y1 has significant interactions with many variables in the linear model, and model R2 increases slightly.**
+-   **SPEI_y1 has significant interactions with many variables in the linear model, model comparison ANOVA is significant, and model R2 increases slightly.**
 
 -   **Need to be careful to include null model testing.**
 
 # 3. Value of previous-year SPEI *after drought*
 
-For post-drought (PBE TRUE) observations, is SPEI_yr1 significant?
+Similar to the previous section but focused on *post-drought observations* 
+(was SPEI <= -1 the previous year but now, in year of Rs measurement, 
+SPEI is >= 0).
 
-For this we compute a "potential Birch Effect" flag `PBE`: TRUE when (i) the current year has SPEI \>=0 (non-drought) and (ii) the previous year had SPEI \<= 1 (drought).
+```{r post-drought}
+dat_test_spei %>% 
+    filter(SPEI12 >= 0 & SPEI12_y1 <= -1) ->
+    dat_test_post_drought
+```
+
+There are `r nrow(dat_test_post_drought)` Rs data points that meet these post-drought criteria.
 
 ```{r post-drought-spei}
-#| eval: false
+m_pd <- lm(formula = formula(m_Rs_spei), data = dat_test_post_drought)
+m_pd_reduced <- MASS::stepAIC(m_pd, trace = FALSE)
+m_pd_y1 <- lm(formula = formula(m_Rs_spei_y1), data = dat_test_post_drought)
+m_pd_y1_reduced <- MASS::stepAIC(m_pd_y1, trace = FALSE)
 
-dat_test_spei %>% 
-    mutate(PBE = SPEI12 >= 0 & SPEI12_y1 <= -1) %>% 
-    filter(PBE) ->
-    dat_test_pbe
+message("Post-drought model *with* previous-year SPEI: training R2 = ", lm_r2(m_pd_y1_reduced))
+message("Post-drought model *without* previous-year SPEI: training R2 = ", lm_r2(m_pd_reduced))
+message("ANOVA model comparison p-value: ", 
+        anova_p_twomodels(m_pd_y1_reduced, m_pd_reduced))
 
-m_pbe <- lm(formula = formula(m_Rs_spei_y1), data = dat_test_pbe)
-m_pbe_reduced <- MASS::stepAIC(m_pbe, trace = FALSE)
-summary(m_pbe_reduced)
+tibble(sqrt_Rs_annual = dat_test_post_drought$sqrt_Rs_annual, 
+       WITHOUT_y1_SPEI = predict(m_pd),
+       WITH_y1_SPEI = predict(m_pd_y1_reduced),
+       Ecosystem_type = dat_test_post_drought$Ecosystem_type) %>% 
+    pivot_longer(starts_with("WITH")) %>% 
+    ggplot(aes(sqrt_Rs_annual, value, color = name)) +
+    geom_point() + geom_abline() + 
+    geom_smooth(method = lm, formula = y~x, se = FALSE, linetype = 2) +
+    xlab("Observed Rs_annual") + ylab("Predicted Rs_annual")
 ```
 
-Null test: is previous-year SPEI significant if conditions were similar, i.e. no drought the previous year?
+Null test: random SPEI_y1.
 
 ```{r null-no-change}
-#| eval: false
-
-dat_test_spei %>% 
-    filter(SPEI12 > 0, SPEI12 < 0.5, SPEI12_y1 > 0, SPEI12_y1 < 0.5) ->
-    dat_test_no_spei_change
-
-m_no_change <- lm(formula = formula(m_Rs_spei_y1), data = dat_test_no_spei_change)
-m_no_change_reduced <- MASS::stepAIC(m_no_change, trace = FALSE)
-summary(m_no_change_reduced)
-```
-
-Null test: random `SPEI_yr1`.
-
-```{r null-random}
-dat_test_spei %>% 
+dat_test_post_drought %>% 
     mutate(SPEI12_y1 = runif(n())) ->
-    dat_test_random_speiy1
+    dat_test_post_drought_random
 
-m_random <- lm(formula = formula(m_Rs_spei_y1), data = dat_test_random_speiy1)
-m_random_reduced <- MASS::stepAIC(m_random, trace = FALSE)
-summary(m_random_reduced)
+m_pd_random <- lm(formula = formula(m_pd_y1), data = dat_test_post_drought_random)
+m_pd_random_reduced <- MASS::stepAIC(m_pd_random, trace = FALSE)
+
+message("Post-drought model without previous-year SPEI: training R2 = ", lm_r2(m_pd_reduced))
+message("Post-drought model with *random* previous-year SPEI: training R2 = ", lm_r2(m_pd_random_reduced))
+message("ANOVA model comparison p-value: ", 
+        anova_p_twomodels(m_pd_reduced, m_pd_random_reduced))
 ```
+
+**Conclusions: for post-drought observations, previous-year SPEI1 has a big effect on prediction.**
 
 # 4. Testing for a Birch effect
 
