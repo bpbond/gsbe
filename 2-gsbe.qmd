@@ -245,22 +245,16 @@ for(dv in dvs) {
 bind_rows(kf_out) %>% 
     group_by(dv) %>% 
     summarise(across(everything(), mean)) %>% 
-    mutate(k = K_FOLD) # just so it's "10" or whatever as expected
+    mutate(k = K_FOLD) -> # just so it's "10" or whatever as expected
+    kf_out 
+print(kf_out)
 
-# # Fit a model without PBE and compare
-# rf_all_data_no_PBE <- ranger(sqrt_Rs_annual ~ ., 
-#                              data = select(test, -PBE),
-#                              importance = "impurity")
-# 
-# tibble(model_with_PBE =rf_all_data$predictions,
-#        model_without_PBE = rf_all_data_no_PBE$predictions,
-#        PBE = test$PBE,
-#        Ecosystem_type = test$Ecosystem_type) %>% 
-#     ggplot(aes(model_without_PBE, model_with_PBE)) + 
-#     geom_point(aes(color = PBE)) + 
-#     geom_abline() + 
-#     facet_wrap(~Ecosystem_type) +
-#     ggtitle("Random Forest: effect of including PBE")
+```
+
+**Side note: model performance is linearly related to dataset size! Huh.**
+
+```{r side-note}
+ggplot(kf_out, aes(n, validation_r2)) + geom_point() + geom_smooth(method = lm, formula = y~x)
 ```
 
 ## How important are the MODIS data?
