@@ -1,5 +1,5 @@
 ---
-title: "gsbe"
+title: "2-gsbe"
 author: "bbl"
 format:
   html:
@@ -42,8 +42,10 @@ r2 <- function(preds, obs) {
     tss <- sum((obs - mean(obs)) ^ 2)
     return(1 - rss / tss)
 }
+
 # Utility function: extract and round linear model R2
 lm_r2 <- function(m) round(summary(m)$adj.r.squared, 4)
+
 # Utility function: ANOVA comparison of two linear models
 anova_p_twomodels <- function(m1, m2) round(anova(m1, m2)$`Pr(>F)`[2], 4)
 ```
@@ -340,9 +342,7 @@ Seems like xgboost is over-fitting to the training data. Note however that
 
 ### Test neural network
 
-We use the `neuralnet` package for this. I experimented with the
-hidden layer topology and threshold settings to find a configuration that
-reliably converges with these data. Note: fitting this is _slow_.
+We use the `neuralnet` package for this. I experimented with the hidden layer topology and threshold settings to find a configuration that reliably converges with these data. Note: fitting this is *slow*.
 
 ```{r neuralnet}
 #| cache: true
@@ -381,8 +381,7 @@ do_k_fold(x, fit_and_test_nn, k = 10) %>%
     summary()
 ```
 
-With a complex topology (e.g., three hidden layers) the training R2 can
-be cranked up to 0.9+, but it exhibits severe overfitting.
+With a complex topology (e.g., three hidden layers) the training R2 can be cranked up to 0.9+, but it exhibits severe overfitting.
 
 **Conclusion: I'm not an expert here! But, no evidence that this will be a magic bullet.**
 
@@ -523,8 +522,7 @@ message("ANOVA model comparison p-value: ",
         anova_p_twomodels(m_Rs_spei_y1_reduced, m_Rs_spei_reduced))
 ```
 
-**BUT there's a problem with the above.** Fit a model with _random_ 
-previous-year SPEI data:
+**BUT there's a problem with the above.** Fit a model with *random* previous-year SPEI data:
 
 ```{r random-speiyr1}
 dat_test_spei %>% 
@@ -564,9 +562,7 @@ anova(m_spei_random1_reduced, m_spei_random2_reduced)
 
 For post-drought (PBE TRUE) observations, is SPEI_yr1 significant?
 
-For this we compute a "potential Birch Effect" flag `PBE`: TRUE when
-(i) the current year has SPEI >=0 (non-drought) and 
-(ii) the previous year had SPEI <= 1 (drought).
+For this we compute a "potential Birch Effect" flag `PBE`: TRUE when (i) the current year has SPEI \>=0 (non-drought) and (ii) the previous year had SPEI \<= 1 (drought).
 
 ```{r post-drought-spei}
 #| eval: false
@@ -581,8 +577,7 @@ m_pbe_reduced <- MASS::stepAIC(m_pbe, trace = FALSE)
 summary(m_pbe_reduced)
 ```
 
-Null test: is previous-year SPEI significant if conditions were similar, 
-i.e. no drought the previous year?
+Null test: is previous-year SPEI significant if conditions were similar, i.e. no drought the previous year?
 
 ```{r null-no-change}
 #| eval: false
@@ -607,7 +602,6 @@ m_random <- lm(formula = formula(m_Rs_spei_y1), data = dat_test_random_speiy1)
 m_random_reduced <- MASS::stepAIC(m_random, trace = FALSE)
 summary(m_random_reduced)
 ```
-
 
 # 4. Testing for a Birch effect
 
