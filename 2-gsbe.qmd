@@ -472,7 +472,7 @@ m_Rs_spei <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
             Veg_type_hi + Veg_type_low + Soil_type_name,
         data = dat_test_spei_current)
 m_Rs_spei_reduced <- MASS::stepAIC(m_Rs_spei, trace = FALSE)
-summary(m_Rs_spei_reduced)
+car::Anova(m_Rs_spei_reduced, type = "III")
 
 message("Model *with* SPEI data: training R2 = ", lm_r2(m_Rs_spei_reduced))
 message("Model *without* SPEI data: training R2 = ", lm_r2(m_Rs_reduced))
@@ -508,7 +508,7 @@ m_Rs_spei_y1 <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
             Veg_type_hi + Veg_type_low + Soil_type_name,
         data = dat_test_spei)
 m_Rs_spei_y1_reduced <- MASS::stepAIC(m_Rs_spei_y1, trace = FALSE)
-summary(m_Rs_spei_y1_reduced)
+car::Anova(m_Rs_spei_y1_reduced, type = "III")
 
 message("Model *with* previous-year SPEI data: training R2 = ", lm_r2(m_Rs_spei_y1_reduced))
 message("Model *without* previous-year SPEI data: training R2 = ", lm_r2(m_Rs_spei_reduced))
@@ -525,7 +525,7 @@ dat_test_spei %>%
 
 m_spei_random1 <- lm(formula(m_Rs_spei_y1), data = dat_test_spei_random)
 m_spei_random1_reduced <- MASS::stepAIC(m_spei_random1, trace = FALSE)
-summary(m_spei_random1_reduced)
+car::Anova(m_spei_random1_reduced, type = "III")
 ```
 
 ...and some of the `SPEI_yr1` terms might still be significant, just by chance!
@@ -608,38 +608,33 @@ message("ANOVA model comparison p-value: ",
 
 # 4. Testing for a Birch effect
 
+Are post-drought observations 'different'?
+
+Define a PBE ("potential Birch effect") flag using the post-drought
+conditions above: PBE <= -1 the previous year and PBE >0 = the year of
+Rs measurement.
+
 ## Linear model: PBE importance and interactions
 
 ```{r test-linear}
 #| fig-width: 10
 #| fig-height: 6
-#| eval: false
 
-dat_filtered %>% 
-    mutate(PBE = SPEI12_y1 <= -1 & SPEI12 > 0,
-           Ecosystem_type_number = as.numeric(Ecosystem_type)) %>% 
-    select(sqrt_Rs_annual, 
-           Ecosystem_type, Ecosystem_type_number, 
-           SPEI12, PBE, 
-           Tair, Tsoil_lev1, Tsoil_lev2,
-           Precip, VWC_lev1, VWC_lev2, 
-           Veg_type_hi, Veg_type_low, LAI_high, LAI_low,
-           Soil_type_number) %>% 
-    filter(complete.cases(.)) ->
-    dat_linear
+dat_test_spei %>% 
+    mutate(PBE = SPEI12_y1 <= -1 & SPEI12 > 0) %>% 
+    dplyr::select(-ends_with("_y1")) ->
+    dat_pbe
 
 message("Fitting Rs_annual linear model with PBE (SPEI12, -1.0) effect...")
 m_Rs <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
             VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * PBE +
-            Ecosystem_type_number + LAI_high * LAI_low + 
-            Veg_type_hi + Veg_type_low + Soil_type_number,
-        data = dat_linear)
+            Ecosystem_type + LAI_high * LAI_low + 
+            Veg_type_hi + Veg_type_low + Soil_type_name,
+        data = dat_pbe)
 m_Rs_reduced <- MASS::stepAIC(m_Rs, trace = FALSE)
-summary(m_Rs_reduced)
+car::Anova(m_Rs_reduced, type = "III")
 par(mfrow = c(2, 2))
 plot(m_Rs_reduced)
-
-car::Anova(m_Rs_reduced, type = "III")
 
 message("Fitting Rs_annual linear model without PBE effect...")
 m_Rs_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
