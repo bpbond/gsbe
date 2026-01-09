@@ -139,6 +139,7 @@ Wright, M. N. and Ziegler, A.: Ranger: A fast implementation of random forests f
 ```{r base-rf}
 #| fig-width: 10
 #| fig-height: 6
+#| cache: true
 
 # Fit random forest model and test against validation data
 # The independent variable is in the first column
@@ -217,7 +218,12 @@ message("Full-data model performance:")
 rf_all_data <- ranger(sqrt_Rs_annual ~ ., data = dat_base_Rs_annual, importance = "impurity")
 print(rf_all_data)
 
+message("Random forest predictor importance and Altmann p-values:")
 imps <- sort(rf_all_data$variable.importance, decreasing = TRUE)
+importance_pvalues(rf_all_data, "altmann", 
+                   num.permutations = 100,
+                   formula = sqrt_Rs_annual ~ ., 
+                   data = dat_base_Rs_annual)
 
 # Top three variables...
 pdpVars(data = dat_base_Rs_annual, 
@@ -262,6 +268,8 @@ ggplot(kf_out, aes(n, validation_r2)) + geom_point() + geom_smooth(method = lm, 
 The MODIS data only start in 2001 (see `gsbe-data-prep` output), so requiring them in a model cuts off a lot of early data – on the order of 20% of the dataset. Are they needed?
 
 ```{r test-modis}
+#| cache: true
+
 dat_base_all %>% 
     select(-sqrt_Rh_annual, -sqrt_Rs_growingseason, -starts_with("SPEI")) %>% 
     filter(complete.cases(.)) -> 
@@ -272,6 +280,11 @@ print(rf_modis)
 
 message("Model *with* MODIS data: OOB R2 = ", round(rf_modis$r.squared, 4))
 message("Model *without* MODIS data: OOB R2 = ", round(rf_all_data$r.squared, 4))
+
+importance_pvalues(rf_modis, "altmann", 
+                   num.permutations = 100,
+                   formula = sqrt_Rs_annual ~ ., 
+                   data = dat_base_test_modis)
 ```
 
 **Conclusion: it doesn't seem like they're needed.**
@@ -444,6 +457,7 @@ tibble(Ecosystem_type = dat_base_Rs_annual$Ecosystem_type,
 # 1. Predictive value of SPEI
 
 ```{r spei-value}
+#| cache: true
 
 dat_base_all %>% 
     select(-sqrt_Rh_annual, -sqrt_Rs_growingseason,
@@ -459,7 +473,10 @@ dat_test_spei_current <- dat_test_spei[-yr1cols]
 message("Testing Random Forest...")
 rf_spei <- ranger(sqrt_Rs_annual ~ ., data = dat_test_spei_current, importance = "impurity")
 print(rf_spei)
-sort(desc(importance(rf_spei)))
+importance_pvalues(rf_spei, "altmann", 
+                   num.permutations = 100,
+                   formula = sqrt_Rs_annual ~ ., 
+                   data = dat_test_spei_current)
 
 message("Model *with* SPEI data: OOB R2 = ", round(rf_spei$r.squared, 4))
 message("Model *without* SPEI data: OOB R2 = ", round(rf_all_data$r.squared, 4))
@@ -495,10 +512,13 @@ message("ANOVA model comparison p-value: ",
 message("Testing Random Forest...")
 rf_spei_y1 <- ranger(sqrt_Rs_annual ~ ., data = dat_test_spei, importance = "impurity")
 print(rf_spei_y1)
-sort(desc(importance(rf_spei_y1)))
-
 message("Model *with* previous-year SPEI data: OOB R2 = ", round(rf_spei_y1$r.squared, 4))
 message("Model *without* previous-year SPEI data: OOB R2 = ", round(rf_all_data$r.squared, 4))
+
+importance_pvalues(rf_spei_y1, "altmann", 
+                   num.permutations = 100,
+                   formula = sqrt_Rs_annual ~ ., 
+                   data = dat_test_spei)
 
 message("Testing linear model...")
 m_Rs_spei_y1 <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
@@ -567,6 +587,7 @@ dat_test_spei %>%
 There are `r nrow(dat_test_post_drought)` Rs data points that meet these post-drought criteria.
 
 ```{r post-drought-spei}
+message("Linear model:")
 m_pd <- lm(formula = formula(m_Rs_spei), data = dat_test_post_drought)
 m_pd_reduced <- MASS::stepAIC(m_pd, trace = FALSE)
 m_pd_y1 <- lm(formula = formula(m_Rs_spei_y1), data = dat_test_post_drought)
@@ -619,6 +640,7 @@ Rs measurement.
 ```{r test-linear}
 #| fig-width: 10
 #| fig-height: 6
+#| eval: false
 
 dat_test_spei %>% 
     mutate(PBE = SPEI12_y1 <= -1 & SPEI12 > 0) %>% 
