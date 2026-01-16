@@ -662,6 +662,17 @@ srdb_sample %>%
               `sqrt(Rh_annual)` = sqrt(Rh_annual)) %>% 
     pairs(col = hcl.colors(nst, "Temps")[stn])
 
+message("Correlation between temperature predictors")
+srdb_sample %>% 
+    select(Tair, Tsoil_lev1, Tsoil_lev2) %>%
+    filter(complete.cases(.)) %>%
+    cor()
+
+message("Correlation between water predictors")
+srdb_sample %>% select(Precip, VWC_lev1, VWC_lev2) %>%
+    filter(complete.cases(.)) %>%
+    cor()
+
 OUTFILE <- "srdb_joined_data.csv"
 message("Writing ", OUTFILE)
 write_csv(srdb_sample, OUTFILE)

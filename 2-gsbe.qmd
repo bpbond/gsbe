@@ -193,8 +193,12 @@ do_k_fold <- function(x, f, k = K_FOLD, quiet = TRUE, ...) {
 # Base test dataset (all three d.v.'s)
 dat_filtered %>% 
     select(sqrt_Rs_annual, sqrt_Rh_annual, sqrt_Rs_growingseason,
-           Tair, Tsoil_lev1, Tsoil_lev2,
-           Precip, VWC_lev1, VWC_lev2, 
+           # Tair, Tsoil_lev1, and Tsoil_lev2 are *highly* correlated
+           # with each other (see 1-gsbe-data-prep), so drop level 2
+           Tair, Tsoil_lev1, #Tsoil_lev2,
+           # VWC_lev1 and VWC_lev2 are *highly* correlated with each
+           # other (see 1-gsbe-data-prep), so drop level 2
+           Precip, VWC_lev1, #VWC_lev2, 
            LAI_high, LAI_low, Ecosystem_type,
            starts_with("SPEI"),
            MODIS_NPP, MODIS_GPP,
@@ -260,7 +264,10 @@ print(kf_out)
 **Side note: model performance is linearly related to dataset size! Huh.**
 
 ```{r side-note}
-ggplot(kf_out, aes(n, validation_r2)) + geom_point() + geom_smooth(method = lm, formula = y~x)
+ggplot(kf_out, aes(n, validation_r2)) + 
+    geom_point() + 
+    geom_smooth(method = lm, formula = y~x) +
+    ggtitle("Validation R2 for Rs_annual, Rh_annual, and Rs_growingseason")
 ```
 
 ## How important are the MODIS data?
@@ -343,16 +350,23 @@ do_k_fold(dat_base_Rs_annual, fit_and_test_xgboost) %>%
 
 Seems like xgboost is over-fitting to the training data. Note however that
 
-> Unlike random forests, GBMs can have high variability in accuracy dependent on their hyperparameter settings [(Probst, Bischl, and Boulesteix 2018)](https://arxiv.org/abs/1802.09596) So tuning can require much more strategy than a random forest model.
+> Unlike random forests, GBMs can have high variability in accuracy dependent 
+on their hyperparameter settings [(Probst, Bischl, and Boulesteix 2018)](https://arxiv.org/abs/1802.09596) So tuning can require much more 
+strategy than a random forest model.
 
 **Conclusion: performance and variable importance seem similar to `ranger`.**
 
 ### Test neural network
 
-We use the `neuralnet` package for this. I experimented with the hidden layer topology and threshold settings to find a configuration that reliably converges with these data. Note: fitting this is *slow*.
+We use the `neuralnet` package for this. I experimented with the hidden layer
+topology and threshold settings to find a configuration that reliably converges
+with these data. Note: fitting this is *slow*.
 
 ```{r neuralnet}
 #| cache: true
+#| eval: false
+
+# eval:false above b/c this is SO SLOW
 
 library(neuralnet)
 
@@ -409,8 +423,8 @@ fit_and_test_lm <- function(x_train, x_val, m) {
 }
 
 message("Fitting Rs_annual linear model...")
-m_Rs <- lm(sqrt_Rs_annual ~ Tair + Tsoil_lev1 + Tsoil_lev2 +
-            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2) +
+m_Rs <- lm(sqrt_Rs_annual ~ Tair + Tsoil_lev1 + 
+            VWC_lev1 + I(VWC_lev1 ^ 2) + 
             Ecosystem_type + LAI_high * LAI_low + 
             Veg_type_hi + Veg_type_low + Soil_type_name,
         data = dat_base_Rs_annual)
@@ -483,8 +497,8 @@ message("Model *with* SPEI data: OOB R2 = ", round(rf_spei$r.squared, 4))
 message("Model *without* SPEI data: OOB R2 = ", round(rf_all_data$r.squared, 4))
 
 message("Testing linear model...")
-m_Rs_spei <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
-            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * 
+m_Rs_spei <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + 
+            VWC_lev1 + I(VWC_lev1 ^ 2)) * 
                SPEI12 +
             Ecosystem_type + LAI_high * LAI_low + 
             Veg_type_hi + Veg_type_low + Soil_type_name,
@@ -522,8 +536,8 @@ importance_pvalues(rf_spei_y1, "altmann",
                    data = dat_test_spei)
 
 message("Testing linear model...")
-m_Rs_spei_y1 <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
-            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * 
+m_Rs_spei_y1 <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + 
+            VWC_lev1 + I(VWC_lev1 ^ 2)) * 
                (SPEI12 + SPEI12_y1) +
             Ecosystem_type + LAI_high * LAI_low + 
             Veg_type_hi + Veg_type_low + Soil_type_name,
@@ -554,8 +568,8 @@ car::Anova(m_spei_random1_reduced, type = "III")
 Use an ANOVA to compare the (reduced) models with and without previous-year SPEI:
 
 ```{r random-speiyr1-anova}
-m_spei_random2 <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
-            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * 
+m_spei_random2 <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + 
+            VWC_lev1 + I(VWC_lev1 ^ 2)) * 
                (SPEI12) +
             Ecosystem_type + LAI_high * LAI_low + 
             Veg_type_hi + Veg_type_low + Soil_type_name,
@@ -649,8 +663,8 @@ dat_test_spei %>%
     dat_pbe
 
 message("Fitting Rs_annual linear model with PBE (SPEI12, -1.0) effect...")
-m_Rs <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
-            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) * PBE +
+m_Rs <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
+            VWC_lev1 + I(VWC_lev1 ^ 2)) * PBE +
             Ecosystem_type + LAI_high * LAI_low + 
             Veg_type_hi + Veg_type_low + Soil_type_name,
         data = dat_pbe)
@@ -660,8 +674,8 @@ par(mfrow = c(2, 2))
 plot(m_Rs_reduced)
 
 message("Fitting Rs_annual linear model without PBE effect...")
-m_Rs_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + Tsoil_lev2 +
-            VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2)) +
+m_Rs_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
+            VWC_lev1 + I(VWC_lev1 ^ 2)) +
             Ecosystem_type_number + LAI_high * LAI_low + 
                 Veg_type_hi + Veg_type_low + Soil_type_number,
         data = dat_linear)
@@ -714,8 +728,8 @@ PBE_interactions %>%
 #| eval: false
 
 fit_and_test_lm <- function(x_train, x_val) {
-    f <- as.formula(paste(colnames(x_train)[1], "~ (Tair + Tsoil_lev1 + Tsoil_lev2 +",
-                          "VWC_lev1 + I(VWC_lev1 ^ 2) + VWC_lev2 ^ 2 + I(VWC_lev2 ^ 2))",
+    f <- as.formula(paste(colnames(x_train)[1], "~ (Tair + Tsoil_lev1 +",
+                          "VWC_lev1 + I(VWC_lev1 ^ 2))",
                           "* PBE + Ecosystem_type + LAI_high * LAI_low +",
                           "Veg_type_hi + Veg_type_low + Soil_type_name"))
 
@@ -753,7 +767,7 @@ spei_windows <- c(12, 24) # months
 predictors <- c("Ecosystem_type",
                 "SPEI12",
                 "Tair", "Precip",
-                "Tsoil_lev1", "Tsoil_lev2", "VWC_lev1", "VWC_lev2", 
+                "Tsoil_lev1", "VWC_lev1", 
                 "Veg_type_hi", "Veg_type_low", 
                 "LAI_high", "LAI_low", "Soil_type_name")
 
