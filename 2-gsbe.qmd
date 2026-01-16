@@ -376,6 +376,7 @@ nums <- sapply(x, is.numeric)
 for(col in names(nums)[nums]) x[col] <- scale(x[col])
 fcts <- sapply(x[-1], is.factor)
 for(col in names(fcts)[fcts]) x[col] <- as.numeric(pull(x[col]))
+#saveRDS(x, "nn_topology/x.RDS")
 
 # Overall model
 m_nn <- neuralnet(sqrt_Rs_annual ~ ., data = x, hidden = c(12, 6), rep = 2, threshold = 0.4)
