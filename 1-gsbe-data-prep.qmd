@@ -245,7 +245,7 @@ spei_annual %>%
     geom_hline(yintercept = c(0, -1), linetype = 2, color = "black") +
     scale_color_manual(values = c("black", "red")) +
     facet_grid(ID ~ .) +
-    ggtitle("Are we identifying SPEI12 jumps (<=-1 to >0) in SRDB correctly? (random 10)")
+    ggtitle("Are we identifying SPEI12 jumps (<=-1 to >0, red dots) correctly? (random 10)")
 ```
 
 ## Climate data
