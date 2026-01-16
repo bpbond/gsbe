@@ -27,7 +27,7 @@ library(arrow)
 
 ## SRDB
 
-The Soil Respiration Database (SRBD) is described by [Jian et al. (2021)](https://essd.copernicus.org/articles/13/255/2021/).
+The Soil Respiration Database (SRBD) is described by [Jian et al. (2021)](https://essd.copernicus.org/articles/13/255/2021/), but the version we use here has had extensive updates since then.
 
 ```{r read-srdb}
 #| fig-width: 12
