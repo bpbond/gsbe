@@ -92,6 +92,13 @@ dat %>%
 
 message("After filtering, ", nrow(dat_filtered), " rows of data")
 ```
+## Collinearity
+
+ `Tair`, `Tsoil_lev1`, and `Tsoil_lev2` are *highly* correlated
+with each other (`see 1-gsbe-data-prep`), so drop level 2.
+
+`VWC_lev1` and `VWC_lev2` are *highly* correlated with each
+other (see `1-gsbe-data-prep`), so drop level 2.
 
 ## Dependent variable distribution
 
