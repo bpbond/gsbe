@@ -12,7 +12,7 @@ editor: visual
 ```{r setup}
 #| include: false
 
-K_FOLD <- 10
+K_FOLD <- 5
 
 # Data processing and visualization packages
 library(dplyr)
@@ -35,19 +35,7 @@ library(xgboost)
 library(geodist)
 library(spatialRF)
 
-# Utility function: very simple R2 computation
-r2 <- function(preds, obs) {
-    stopifnot(length(preds) == length(obs))
-    rss <- sum((preds - obs) ^ 2)
-    tss <- sum((obs - mean(obs)) ^ 2)
-    return(1 - rss / tss)
-}
-
-# Utility function: extract and round linear model R2
-lm_r2 <- function(m) round(summary(m)$adj.r.squared, 4)
-
-# Utility function: ANOVA comparison of two linear models
-anova_p_twomodels <- function(m1, m2) round(anova(m1, m2)$`Pr(>F)`[2], 4)
+source("utilities.R")
 ```
 
 # Background and science questions
@@ -169,34 +157,6 @@ fit_and_test_rf <- function(x_train, x_val) {
                 validation_r2 = validation_r2))
 }
 
-# Do a k-fold cross-validation
-# x = data; f = function to call; k = number of folds; ... = params for model
-do_k_fold <- function(x, f, k = K_FOLD, quiet = TRUE, ...) {
-    if(!all(complete.cases(x))) {
-        stop("x should not have any NAs at this stage!")
-    }
-    
-    groups <- sample.int(n = k, size = nrow(x), replace = TRUE)
-    training_r2 <- rep.int(NA_real_, k)
-    validation_r2 <- rep.int(NA_real_, k)
-    for(i in seq_len(k)) {
-        x_val <- x[groups == i,]
-        x_train <- x[groups != i,]
-        if(!quiet) {
-            message("\tk-fold ", i, ":")
-            message("\t\tTraining is ", nrow(x_train), " x ", ncol(x_train))
-            message("\t\tValidation is ", nrow(x_val), " x ", ncol(x_val))
-        }
-
-        out <- f(x_train = x_train, x_val = x_val, ...)
-        training_r2[i] <- out$training_r2
-        validation_r2[i] <- out$validation_r2
-    }
-    tibble(k = seq_len(k), 
-           training_r2 = training_r2,
-           validation_r2 = validation_r2)
-} # do_k_fold
-
 # Base test dataset (all three d.v.'s)
 dat_filtered %>% 
     select(sqrt_Rs_annual, sqrt_Rh_annual, sqrt_Rs_growingseason,
@@ -217,7 +177,7 @@ dat_base_all %>%
     select(-MODIS_NPP, -MODIS_GPP, -starts_with("SPEI")) ->
     dat_base_no_modispei
 
-# Base test dataset (Rs_annual)
+# Base test dataset (Rs_annual only)
 dat_base_no_modispei %>% 
     select(-sqrt_Rh_annual, -sqrt_Rs_growingseason) %>% 
     filter(complete.cases(.)) -> 
@@ -307,7 +267,8 @@ importance_pvalues(rf_modis, "altmann",
 
 ### Test spatial Random Forest
 
-Spatial autocorrelation wouldn't change the fit of the model, but it could bias the variable importance metrics. Evaluate.
+Spatial autocorrelation wouldn't change the fit of the model, but it could 
+bias the variable importance metrics. Evaluate.
 
 ```{r spatial-rf}
 # This needs the newest version 1.1.5, not yet on CRAN
@@ -335,7 +296,8 @@ spatialRF::rf(data = dat_spatial_test,
 
 ### Test XGBoost
 
-Is there any reason to think that this popular algorithm would out-perform our Random Forest approach, and/or give different answers?
+Is there any reason to think that this popular algorithm would out-perform
+our Random Forest approach, and/or give different answers?
 
 ```{r xgboost}
 fit_and_test_xgboost <- function(x_train, x_val) {
@@ -406,13 +368,15 @@ m_nn <- neuralnet(sqrt_Rs_annual ~ ., data = x, hidden = c(24, 12, 6), rep = 2, 
 message("R2 of three-layer model: ", round(r2(predict(m_nn, newdata = x), x$sqrt_Rs_annual), 3))
 
 message("k-fold cross-validation results:")
-do_k_fold(x, fit_and_test_nn, k = 10) %>% 
+do_k_fold(x, fit_and_test_nn) %>% 
     summary()
 ```
 
-With a complex topology (e.g., three hidden layers) the training R2 can be cranked up to 0.9+, but it exhibits severe overfitting.
+With a complex topology (e.g., three hidden layers) the training R2
+can be cranked up to 0.9+, but it exhibits severe overfitting.
 
-**Conclusion: I'm not an expert here! But, no evidence that this will be a magic bullet.**
+**Conclusion: I'm not an expert here! But, no evidence that this
+will be a magic bullet.**
 
 ## Linear regression model: performance
 
@@ -558,7 +522,8 @@ message("ANOVA model comparison p-value: ",
         anova_p_twomodels(m_Rs_spei_y1_reduced, m_Rs_spei_reduced))
 ```
 
-**BUT there's a problem with the above.** Fit a model with *random* previous-year SPEI data:
+**BUT there's a problem with the above.** 
+Fit a model with *random* previous-year SPEI data:
 
 ```{r random-speiyr1}
 dat_test_spei %>% 
@@ -730,8 +695,7 @@ PBE_interactions %>%
 
 -   **PBE (potential Birch effect, i.e. having a strong drought the year before a well-watered year) has a strong statistical effect on the temperature and moisture drivers of soil respiration.**
 
--   **But, it's inconsistent—there's no clean 'Birch effect.'\
-    **
+-   **But, it's inconsistent—there's no clean 'Birch effect.'**
 
 ## PBE sensitivity test
 
