@@ -100,7 +100,7 @@ We have three potential dependent variables:
 
 Their distributions are expected to be non-normal, which is a problem for linear models and not ideal for anything. Evaluate possible transformations.
 
-```{r iv-dist}
+```{r dv-dist}
 #| fig-width: 10
 #| fig-height: 8
 
@@ -140,7 +140,7 @@ Wright, M. N. and Ziegler, A.: Ranger: A fast implementation of random forests f
 # The independent variable is in the first column
 fit_and_test_rf <- function(x_train, x_val) {
     f <- as.formula(paste(colnames(x_train)[1], "~ ."))
-    rf <- ranger::ranger(formula = f, data = x_train, importance = "impurity")
+    rf <- ranger(formula = f, data = x_train, importance = "impurity")
     # use importance = "permutation" for importance_pvalues()
     training_rmse <- rmse(predict(rf, data = x_train)$predictions, pull(x_train[1]))
         
@@ -154,10 +154,12 @@ fit_and_test_rf <- function(x_train, x_val) {
         validation_rmse <- NA_real_
     }
     
-    return(tibble(training_r2 = rf$r.squared, 
-                  training_rmse = training_rmse,
-                  validation_r2 = validation_r2,
-                  validation_rmse = validation_rmse))
+    tibble(training_r2 = rf$r.squared, 
+           training_rmse = training_rmse,
+           validation_r2 = validation_r2,
+           validation_rmse = validation_rmse,
+           # PBE_importance isn't used until section 4's sensitivity test
+           pbe_importance = rank(importance(rf))["PBE"])
 }
 
 # Base test dataset (all three d.v.'s)
@@ -220,7 +222,10 @@ for(dv in dvs) {
     # Construct dataset and do the k-fold
     x <- dat_base_no_modispei[c(dv, preds)]
     x <- x[complete.cases(x),]
-    kf_out[[dv]] <- do_k_fold(x, fit_and_test_rf) %>% mutate(dv = dv, n = nrow(x))
+    do_k_fold(x, fit_and_test_rf) %>% 
+        select(-pbe_importance) %>%  # not used here
+        mutate(dv = dv, n = nrow(x)) ->
+        kf_out[[dv]]
 }
 bind_rows(kf_out) %>% 
     group_by(dv) %>% 
@@ -413,7 +418,7 @@ message("k-fold cross-validation results:")
 lm_rhs_formula <- as.character(formula(m_Rs))[3]
 kf_out <- list()
 for(dv in dvs) {
-    # Pull out the rhs of the formula and paste dv (dependent variable) in front
+    # Pull out the rhs of the formula and paste iv (independent variable) in front
     f <- as.formula(paste(dv, "~", lm_rhs_formula))
     # Construct dataset and call lm() once to give us a base model
     x <- dat_base_no_modispei[c(dv, preds)]
@@ -635,17 +640,21 @@ Rs measurement.
 #| fig-width: 10
 #| fig-height: 6
 
-# dat_test_spei is sqrt_Rs_annual plus climate predictors, SPEI12, and
-# SPEI_y1
-dat_test_spei %>% 
+dat_base_all %>% 
+    select(-MODIS_NPP, -MODIS_GPP) -> 
+    dat_pbe_base
+
+# First test is using SPEI12, with a <=-1 to >0 as post-drought
+dat_pbe_base %>% 
     mutate(PBE = SPEI12_y1 <= -1 & SPEI12 > 0) %>% 
-    dplyr::select(-starts_with("SPEI")) ->
+    dplyr::select(-sqrt_Rh_annual, -sqrt_Rs_growingseason, -starts_with("SPEI")) %>% 
+    filter(complete.cases(.)) ->
     dat_pbe
 dat_pbe %>% 
     select(-PBE) -> 
     dat_no_pbe
 
-message("Fitting Rs_annual RF model with PBE (SPEI12, -1.0) effect...")
+message("Fitting RF model with PBE (SPEI12, -1.0) effect...")
 rf_pbe <- ranger(sqrt_Rs_annual ~ ., data = dat_pbe, importance = "impurity")
 print(rf_pbe)
 importance_pvalues(rf_pbe, "altmann", 
@@ -657,7 +666,7 @@ rf_no_pbe <- ranger(sqrt_Rs_annual ~ ., data = dat_no_pbe, importance = "impurit
 message("Model *with* PBE flag: OOB R2 = ", round(rf_pbe$r.squared, 4))
 message("Model *without* PBE flag: OOB R2 = ", round(rf_no_pbe$r.squared, 4))
 
-message("Fitting Rs_annual linear model with PBE (SPEI12, -1.0) effect...")
+message("Fitting linear model with PBE (SPEI12, -1.0) effect...")
 m_Rs_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
             VWC_lev1 + I(VWC_lev1 ^ 2)) * PBE +
             Ecosystem_type + LAI_high * LAI_low + 
@@ -671,7 +680,7 @@ m_Rs_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
             VWC_lev1 + I(VWC_lev1 ^ 2)) +
             Ecosystem_type + LAI_high * LAI_low + 
             Veg_type_hi + Veg_type_low + Soil_type_name,
-        data = dat_pbe)
+        data = dat_no_pbe)
 m_Rs_no_PBE_reduced <- MASS::stepAIC(m_Rs_no_PBE, trace = FALSE)
 
 message("Linear model without PBE flag: training R2 = ", lm_r2(m_Rs_no_PBE_reduced))
@@ -715,47 +724,31 @@ PBE_interactions %>%
 
 **Conclusions:**
 
--   **PBE (potential Birch effect, i.e. having a strong drought the year before a well-watered year) has a strong statistical effect on the temperature and moisture drivers of soil respiration.**
+-   **PBE (potential Birch effect: a drought the year before a well-watered year in which Rs was measured) has low importance in a RF model, although its Altmann p-value is marginally significant.**
 
--   **But, it's inconsistent—there's no clean 'Birch effect.'**
+-   **In a linear model, PBE has a strong effect on the temperature and moisture drivers of soil respiration.**
+
+-   **But, it's inconsistent--there's no clean, unidirectional 'Birch effect.'**
 
 ## PBE sensitivity test
 
+Are the above results due to particular choices about what constitutes
+a drought (the SPEI cutoff value) and/or the SPEI window (12 or 24 months)?
+
+Here we test the cutoff SPEI values from Table 1 of 
+[Keune et al. (2025)](https://www.nature.com/articles/s41597-025-04896-y)
+corresponding to "severely dry," "moderately dry," and "mildly dry" conditions.
+
 ```{r sensitivity-test}
-#| eval: false
-
-fit_and_test_lm <- function(x_train, x_val) {
-    f <- as.formula(paste(colnames(x_train)[1], "~ (Tair + Tsoil_lev1 +",
-                          "VWC_lev1 + I(VWC_lev1 ^ 2))",
-                          "* PBE + Ecosystem_type + LAI_high * LAI_low +",
-                          "Veg_type_hi + Veg_type_low + Soil_type_name"))
-
-    m <- lm(formula = f, data = x_train)
-    m_reduced <- MASS::stepAIC(m, trace = FALSE)
-    
-    if(!is.null(x_val)) {
-        preds <- predict(m_reduced, newdata = x_val)
-        obs <- pull(x_train[1])
-        validation_r2 <- rs(preds = preds, obs = obs)
-    } else {
-        validation_r2 <- NA_real_
-    }
-
-    list(model = m_reduced,
-         training_r2 = glance(m_reduced)$r.squared,
-         validation_r2 = validation_r2,
-         importance = tidy(m_reduced))
-}
 
 # These are the three most common fluxes recorded in SRDB
-#iv_set <- c("Rs_annual")#, "Rh_annual", "Rs_growingseason")
-iv_set <- c("sqrt_Rs_annual", "sqrt_Rh_annual", "sqrt_Rs_growingseason")
+dv_set <- c("sqrt_Rs_annual", "sqrt_Rh_annual", "sqrt_Rs_growingseason")
 
 # The following SPEI values are from Table 1 of Keune et al. (2025)
 # https://www.nature.com/articles/s41597-025-04896-y
 # and correspond to "severely dry", "moderately dry", and "mildly dry"
-# (there are no "extremely dry"=-2 in the dataset)
-spei_cutoffs <- c(-1.5, -1.0, 0.0)
+# (there are no "extremely dry"=-2.33 values in the dataset)
+spei_cutoffs <- c(-1.65, -1.28, -0.84)
 
 # What SPEI window should be used for the cutoffs above?
 spei_windows <- c(12, 24) # months
@@ -768,171 +761,138 @@ predictors <- c("Ecosystem_type",
                 "Veg_type_hi", "Veg_type_low", 
                 "LAI_high", "LAI_low", "Soil_type_name")
 
-do_full_analysis <- function(x, iv_set, predictors, spei_windows, spei_cutoffs) {
+# Linear model right hand side
+lm_rhs_formula <- as.character(formula(m_Rs_PBE))[3]
+
+test_lm_pbe <- function(x_train, x_val, formula) {
+    m <- lm(formula = formula, data = x_train)
+    pred_train <- predict(m, newdata = x_train)
+    # If data sizes are small (as happens with Rh_annual and spei_cutoff -1.5)
+    # there might be a mismatch in available data, causing prediction of
+    # validation data to fail
+    try(pred_val <- predict(m, newdata = x_val))
+    if(exists("pred_val")) {
+        validation_r2 <- r2(pred_val, pull(x_val[1]))
+        validation_rmse <- rmse(pred_val, pull(x_val[1]))
+    } else {
+        validation_r2 <- validation_rmse <- NA_real_
+    }
+    
+    # Reduce the model and identify and significant PBE terms remaining
+    m_reduced <- MASS::stepAIC(m, trace = FALSE)
+    pbe_terms <- tidy(m_reduced) %>% filter(grepl("PBE", term))
+    n_pbe_terms <- nrow(pbe_terms)
+    n_signif_pbe_terms <- sum(pbe_terms$p.value < 0.05)
+    
+    # Re-fit model with no PBE term
+    x_no_pbe <- x_train
+    x_no_pbe$PBE <- 1
+    m_no_pbe <- lm(formula = formula, data = x_no_pbe)
+
+    tibble(n_pbe_terms = n_pbe_terms,
+           n_signif_pbe_terms = n_signif_pbe_terms,
+           pbe_anova = anova_p_twomodels(m, m_no_pbe),
+           training_r2 = r2(pred_train, pull(x_train[1])),
+           training_rmse = rmse(pred_train, pull(x_train[1])),
+           validation_r2 = validation_r2,
+           validation_rmse = validation_rmse)
+}
+
+do_sensitivity_analysis <- function(x, dv_set, predictors, spei_windows, spei_cutoffs) {
     rf_results <- list()
     lm_results <- list()
     SPEI_cols <- colnames(x)[grep("^SPEI", colnames(x))]
-    for(iv in iv_set) {
+    for(dv in dv_set) {
         
         for(w in spei_windows) {
             spei_past_col <- paste0("SPEI", w, "_y1")
             
             for(spei_cut in spei_cutoffs) {
                 # Remove other potential independent variables
-                this_x <- x[c(iv, union(predictors, SPEI_cols))]
+                this_x <- x[c(dv, union(predictors, SPEI_cols))]
                 # Complete cases only
                 this_x <- this_x[complete.cases(this_x),]
-                
-                message("---------------------------------------------")
-                message("iv = ", iv)
-                message("spei_cut = ", spei_cut, " window = ", w)
-                #message("\tn = ", nrow(this_x))
-                
-                # identify observations not currently in a drought but that
+
+                message("dv = ", dv, " spei_cut = ",
+                        spei_cut, " window = ", w, " n = ", nrow(this_x))
+
+                # Identify observations not currently in a drought but that
                 # WERE in a drought the previous year
                 # PBE = potential Birch effect
                 this_x$PBE = this_x$SPEI12 > 0 & this_x[spei_past_col] <= spei_cut
-                #message("\tPBE = ", sum(this_x$PBE))
-                
+
                 # Drop non-predictors entirely now
-                this_x <- this_x[c(iv, predictors, "PBE")]
+                this_x <- this_x[c(dv, predictors, "PBE")]
                 
-                # Fit models and save results
-                rf_out <- fit_and_test_rf(this_x, NULL)
-                rf_results[[paste(iv, w, spei_cut)]] <- 
-                    tibble(model = "rf",
-                           spei_window = w,
-                           spei_cut = spei_cut,
-                           iv = iv,
-                           predictor = names(rf_out$importance),
-                           n = nrow(this_x),
-                           pbe_n = sum(this_x$PBE),
-                           importance = rf_out$importance,
-                           training_r2 = rf_out$training_r2)
-                
-                lm_out <- fit_and_test_lm(this_x, NULL)
-                lm_results[[paste(iv, w, spei_cut)]] <- 
-                    tibble(model = "lm",
-                           spei_window = w,
-                           spei_cut = spei_cut,
-                           iv = iv,
-                           predictor = lm_out$importance$term,
-                           importance = lm_out$importance$p.value,
-                           n = nrow(this_x),
-                           pbe_n = sum(this_x$PBE),
-                           training_r2 = lm_out$training_r2)
- 
+                # Construct formula
+                f <- as.formula(paste(dv, "~", lm_rhs_formula))
+
+                # Do the rf k-fold
+                rf_out <- do_k_fold(this_x, fit_and_test_rf)
+                rf_out$model <- "rf"
+                # Do the lm k-fold; do_k_fold will pass f on to fit_and_test_lm
+                lm_out <- do_k_fold(this_x, test_lm_pbe, formula = f)
+                lm_out$model <- "lm"
+                info_cols <- tibble(spei_window = w,
+                                    spei_cut = spei_cut,
+                                    dv = dv,
+                                    n = nrow(this_x),
+                                    n_pbe_true = sum(this_x$PBE))
+                lm_results[[paste(dv, w, spei_cut)]] <- 
+                    bind_cols(info_cols, bind_rows(rf_out, lm_out))
             }
         }
     }
-    bind_rows(bind_rows(rf_results), bind_rows(lm_results))
+    bind_rows(lm_results)
 }
 
-out <- do_full_analysis(dat_filtered,
-                        iv_set, predictors,
-                        spei_windows = c(12,24),
-                        spei_cutoffs = spei_cutoffs)
+out <- do_sensitivity_analysis(dat_pbe_base,
+                               dv_set, predictors,
+                               spei_windows = c(12, 24),
+                               spei_cutoffs = spei_cutoffs)
 
-# Compute means across the SPEI windows, drought definitions, and i.v.'s
+# Compute means across the SPEI windows, drought definitions, and d.v.'s
 out %>% 
-    group_by(model, spei_window, spei_cut, iv, n, pbe_n) %>% 
-    summarise(r2 = round(mean(training_r2), digits = 3), .groups = "drop") %>% 
+    group_by(model, dv, spei_window, spei_cut, n, n_pbe_true) %>% 
+    summarise(n_pbe_terms = mean(n_pbe_terms),
+              n_signif_pbe_terms = mean(n_signif_pbe_terms),
+              pbe_anova = mean(pbe_anova),
+              pbe_importance = mean(pbe_importance),
+              validation_r2 = round(mean(validation_r2, na.rm = TRUE), digits = 3),
+              .groups = "drop") %>% 
     mutate(spei_cut = as.factor(spei_cut),
            spei_window = paste(spei_window, "months")) ->
     out_smry
 
+DT::datatable(out_smry)
+
+ggplot(out_smry %>% filter(validation_r2 > 0),
+       aes(spei_window, spei_cut, fill = validation_r2)) +
+    geom_tile() + 
+    facet_grid(model ~ dv) +
+    ggtitle("k-fold mean R2 by model type and dependent variable")
+
+ggplot(out_smry %>% filter(model == "lm"),
+       aes(spei_window, spei_cut, fill = pbe_anova < 0.05)) +
+    geom_tile() + 
+    facet_wrap(~dv) +
+    ggtitle("lm two-model ANOVA: effect of including PBE")
+
 # Table: number (and % of total) of TRUE PBE entries; how big are the datasets?
 out_smry %>%
     # these numbers are the same for each model type; pick one
-    filter(model == "rf") %>% 
-    mutate(pbe_n = paste0(pbe_n, " (", round(pbe_n / n * 100, 0), "%)")) %>% 
-    select(spei_window, spei_cut, iv, pbe_n) %>% 
-    pivot_wider(names_from = "iv", values_from = "pbe_n") %>% 
-    knitr::kable(caption = "How often do 'PBE events' occur?", align = "r")
-
-```
-
-**Conclusions:**
-
--   **PBE events (low SPEI the previous year, followed by non-drought conditions) occur in 0-20% of the data, depending on criteria.**
-
-## Random Forest sensitivity results
-
-```{r rf-sensitivity}
-#| eval: false
-
-# Table: Training R2 values
-out_smry %>%
-    filter(model == "rf") %>% 
-    select(spei_window, spei_cut, iv, r2) %>% 
-    pivot_wider(names_from = "iv", values_from = "r2") %>% 
-    knitr::kable(caption = "RF training (OOB) R2")
-
-# Table: rank of PBE variable
-out %>% 
-    filter(model == "rf") %>% 
-    group_by(spei_window, spei_cut, iv) %>% 
-    mutate(rank = min_rank(desc(importance))) ->
-    out_ranked
-
-out_ranked %>% 
-    filter(predictor == "PBE") %>% 
-    select(spei_window, spei_cut, iv, rank) %>% 
-    pivot_wider(names_from = "iv", values_from = "rank") %>%
-    knitr::kable(caption = "Rank of PBE variable in RF model")
-
-out_ranked %>% 
-    group_by(iv, predictor) %>% summarise(rank = mean(rank)) %>% 
-    ggplot(aes(iv, predictor, fill = rank)) + 
-    geom_tile() + 
-    xlab("Independent variable") +
-    ggtitle("Predictor ranks in RF model")
-```
-
-**Conclusions:**
-
--   **The values used for SPEI window (12/24 months) and drought level (0, -1, -1.5) don't make much difference.**
-
--   **RF model explains 52-65% of OOB variability**
-
--   **Precip and Tair are uniformly important; LAI and soil temp/VWC medium importance; PBE (drought effect from previous year) not important**
-
-## Linear model sensitivity results
-
-```{r lm-sensitivity}
-#| eval: false
-
-# Table: Training R2 values
-out_smry %>%
     filter(model == "lm") %>% 
-    select(spei_window, spei_cut, iv, r2) %>% 
-    pivot_wider(names_from = "iv", values_from = "r2") %>% 
-    knitr::kable(caption = "lm training adjusted R2")
-
-# Rank of significant variables
-# We're using the p-value for a crude approach
-out %>% 
-    filter(model == "lm", importance < 0.05, grepl("PBE", predictor)) %>% 
-    group_by(iv, predictor) %>% 
-    mutate(n_signif = n()) %>% 
-    ggplot(aes(iv, predictor, fill = n_signif)) + 
-    geom_tile() + 
-    xlab("Independent variable") +
-    ggtitle("PBE significance counts in linear model")
-
-message("PBE is significant by itself in a few models:")
-out %>% 
-    filter(predictor=="PBETRUE", model=="lm", importance < 0.05) %>% 
-    select(-model, -training_r2)
+    mutate(pbe_true = paste0(n_pbe_true, " (", round(n_pbe_true / n * 100, 0), "%)")) %>% 
+    select(dv, spei_window, spei_cut, pbe_true) %>% 
+    pivot_wider(names_from = "dv", values_from = "pbe_true") %>% 
+    knitr::kable(caption = "How many 'PBE events' are present in the data?", align = "r")
 ```
 
 **Conclusions:**
 
--   **The values used for SPEI window (12/24 months) and drought level (0, -1, -1.5) don't make much difference.**
+-   **PBE events (low SPEI the previous year, followed by non-drought conditions) occur in 0-10% of the data, depending on criteria.**
 
--   **The linear model explains 16-27% of training data variability.**
-
--   **PBE significantly interacts with Tair (esp. in predicting Rs_annual), Tsoil, and VWC.**
+-   **In a linear model, an ANOVA comparing models with and without PBE is almost always significant for Rs_annual and Rh_annual w/ 12-month SPEI; the exceptions are at the most extreme drought cutoff value.**
 
 ## Conditional inference Random Forest
 
@@ -940,21 +900,51 @@ out %>%
 
 From <https://bradleyboehmke.github.io/HOML/random-forest.html>.
 
-Our `PBE` flag is a binary variable, so is its importance being under-valued by `ranger`? Test a conditional inference tree-based forest:
+Our `PBE` flag is a binary variable, so is its importance being
+under-valued by `ranger`? Test a 
+[conditional inference](https://link.springer.com/article/10.1186/1471-2105-9-307) 
+tree-based forest (note, this is slow):
 
 ```{r conditional-inference}
-#| eval: false
+#| cache: true
 
 m_ci <- cforest(sqrt_Rs_annual ~ ., data = dat_pbe)
-summary(m_ci)
+print(m_ci)
 message("Variable importance of CI forest:")
 sort(varimp(m_ci), decreasing = TRUE)
 
-message("TODO: k-fold validation R2")
+# Fit c.i. random forest model and test against validation data
+# The independent variable is in the first column
+fit_and_test_ci_rf <- function(x_train, x_val) {
+    f <- as.formula(paste(colnames(x_train)[1], "~ ."))
+    rf <- cforest(formula = f, data = x_train)
+    train_preds <- predict(rf, newdata = NULL)
+    training_r2 <- r2(train_preds, pull(x_train[1]))
+    training_rmse <- rmse(train_preds, pull(x_train[1]))
+    
+    if(!is.null(x_val)) {
+        val_preds <- predict(rf, newdata = x_val)
+        val_obs <- pull(x_val[1])
+        validation_r2 <- r2(preds = val_preds, obs = val_obs)
+        validation_rmse <- rmse(preds = val_preds, obs = val_obs)
+    } else {
+        validation_r2 <- NA_real_
+        validation_rmse <- NA_real_
+    }
+    
+    tibble(training_r2 = training_r2, 
+           training_rmse = training_rmse,
+           validation_r2 = validation_r2,
+           validation_rmse = validation_rmse)
+}
 
+do_k_fold(dat_pbe, fit_and_test_ci_rf) %>% 
+    summarise(across(everything(), \(x) mean(x, digits = 3))) %>%
+    mutate(k = K_FOLD)
 ```
 
-**Conclusion: no evidence that conditional inference random forest produces different results.**
+**Conclusion: no evidence that conditional inference random 
+forest produces different results.**
 
 # Summary
 
