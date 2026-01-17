@@ -142,19 +142,22 @@ fit_and_test_rf <- function(x_train, x_val) {
     f <- as.formula(paste(colnames(x_train)[1], "~ ."))
     rf <- ranger::ranger(formula = f, data = x_train, importance = "impurity")
     # use importance = "permutation" for importance_pvalues()
-    
+    training_rmse <- rmse(predict(rf, data = x_train)$predictions, pull(x_train[1]))
+        
     if(!is.null(x_val)) {
-        preds <- predict(rf, data = x_val)$predictions
-        obs <- pull(x_val[1])
-        validation_r2 <- r2(preds = preds, obs = obs)
+        val_preds <- predict(rf, data = x_val)$predictions
+        val_obs <- pull(x_val[1])
+        validation_r2 <- r2(preds = val_preds, obs = val_obs)
+        validation_rmse <- rmse(preds = val_preds, obs = val_obs)
     } else {
         validation_r2 <- NA_real_
+        validation_rmse <- NA_real_
     }
-
-    return(list(model = rf,
-                training_r2 = rf$r.squared, 
-                importance = importance(rf), 
-                validation_r2 = validation_r2))
+    
+    return(tibble(training_r2 = rf$r.squared, 
+                  training_rmse = training_rmse,
+                  validation_r2 = validation_r2,
+                  validation_rmse = validation_rmse))
 }
 
 # Base test dataset (all three d.v.'s)
@@ -221,7 +224,7 @@ for(dv in dvs) {
 }
 bind_rows(kf_out) %>% 
     group_by(dv) %>% 
-    summarise(across(everything(), mean)) %>% 
+    summarise(across(everything(), \(x) mean(x, digits = 3)), .groups = "drop") %>% 
     mutate(k = K_FOLD) -> # just so it's "10" or whatever as expected
     kf_out 
 print(kf_out)
@@ -390,7 +393,9 @@ fit_and_test_lm <- function(x_train, x_val, m) {
     pred_train <- predict(m, newdata = x_train)
     pred_val <- predict(m, newdata = x_val)
     tibble(training_r2 = r2(pred_train, pull(x_train[1])),
-           validation_r2 = r2(pred_val, pull(x_val[1])))
+           training_rmse = rmse(pred_train, pull(x_train[1])),
+           validation_r2 = r2(pred_val, pull(x_val[1])),
+           validation_rmse = rmse(pred_val, pull(x_val[1])))
 }
 
 message("Fitting Rs_annual linear model...")
@@ -419,7 +424,9 @@ for(dv in dvs) {
 }
 bind_rows(kf_out) %>% 
     group_by(dv) %>% 
-    summarise(across(everything(), mean)) %>% 
+    summarise(across(everything(), mean), .groups = "keep") %>% 
+    mutate(across(everything(), round, digits = 3)) %>% 
+    ungroup() %>% 
     mutate(k = K_FOLD) # just so it's "10" or whatever as expected
 
 # Directly compare lm and rf predictions
@@ -814,7 +821,7 @@ out <- do_full_analysis(dat_filtered,
 # Compute means across the SPEI windows, drought definitions, and i.v.'s
 out %>% 
     group_by(model, spei_window, spei_cut, iv, n, pbe_n) %>% 
-    summarise(r2 = round(mean(training_r2), 3), .groups = "drop") %>% 
+    summarise(r2 = round(mean(training_r2), digits = 3), .groups = "drop") %>% 
     mutate(spei_cut = as.factor(spei_cut),
            spei_window = paste(spei_window, "months")) ->
     out_smry

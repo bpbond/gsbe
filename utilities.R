@@ -9,8 +9,7 @@ do_k_fold <- function(x, f, k = K_FOLD, quiet = TRUE, ...) {
     }
 
     groups <- sample.int(n = k, size = nrow(x), replace = TRUE)
-    training_r2 <- rep.int(NA_real_, k)
-    validation_r2 <- rep.int(NA_real_, k)
+    out <- list()
     for(i in seq_len(k)) {
         x_val <- x[groups == i,]
         x_train <- x[groups != i,]
@@ -20,13 +19,10 @@ do_k_fold <- function(x, f, k = K_FOLD, quiet = TRUE, ...) {
             message("\t\tValidation is ", nrow(x_val), " x ", ncol(x_val))
         }
 
-        out <- f(x_train = x_train, x_val = x_val, ...)
-        training_r2[i] <- out$training_r2
-        validation_r2[i] <- out$validation_r2
+        out[[i]] <- f(x_train = x_train, x_val = x_val, ...)
     }
-    tibble(k = seq_len(k),
-           training_r2 = training_r2,
-           validation_r2 = validation_r2)
+    bind_rows(out, .id = "k") %>%
+        mutate(k = as.integer(k))
 } # do_k_fold
 
 # Utility function: simple R2 computation
