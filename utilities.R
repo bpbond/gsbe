@@ -37,6 +37,9 @@ r2 <- function(preds, obs) {
     return(1 - rss / tss)
 }
 
+# Utility function: root mean square error
+rmse <- function(preds, obs) sqrt(mean((preds - obs) ^ 2))
+
 # Utility function: extract and round linear model R2
 lm_r2 <- function(m) round(summary(m)$adj.r.squared, 4)
 
