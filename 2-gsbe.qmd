@@ -662,8 +662,9 @@ Rs measurement.
 ```{r test-linear}
 #| fig-width: 10
 #| fig-height: 6
-#| eval: false
 
+# dat_test_spei is sqrt_Rs_annual plus climate predictors, SPEI12, and
+# SPEI_y1
 dat_test_spei %>% 
     mutate(PBE = SPEI12_y1 <= -1 & SPEI12 > 0) %>% 
     dplyr::select(-ends_with("_y1")) ->
@@ -677,20 +678,24 @@ m_Rs <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
         data = dat_pbe)
 m_Rs_reduced <- MASS::stepAIC(m_Rs, trace = FALSE)
 car::Anova(m_Rs_reduced, type = "III")
-par(mfrow = c(2, 2))
-plot(m_Rs_reduced)
 
 message("Fitting Rs_annual linear model without PBE effect...")
 m_Rs_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
             VWC_lev1 + I(VWC_lev1 ^ 2)) +
-            Ecosystem_type_number + LAI_high * LAI_low + 
-                Veg_type_hi + Veg_type_low + Soil_type_number,
-        data = dat_linear)
+            Ecosystem_type + LAI_high * LAI_low + 
+            Veg_type_hi + Veg_type_low + Soil_type_name,
+        data = dat_pbe)
+m_Rs_no_PBE_reduced <- MASS::stepAIC(m_Rs_no_PBE, trace = FALSE)
+
+message("Linear model without PBE flag: training R2 = ", lm_r2(m_Rs_no_PBE_reduced))
+message("Linear model with PBE flag: training R2 = ", lm_r2(m_Rs_reduced))
+message("ANOVA model comparison p-value: ", 
+        anova_p_twomodels(m_Rs_reduced, m_Rs_no_PBE_reduced))
 
 tibble(model_with_PBE = predict(m_Rs),
        model_without_PBE = predict(m_Rs_no_PBE),
-       PBE = dat_linear$PBE, 
-       Ecosystem_type = dat_linear$Ecosystem_type) %>% 
+       PBE = dat_pbe$PBE, 
+       Ecosystem_type = dat_pbe$Ecosystem_type) %>% 
     ggplot(aes(model_without_PBE, model_with_PBE)) + 
     geom_point(aes(color = PBE)) + 
     geom_abline() + 
@@ -719,7 +724,6 @@ PBE_interactions %>%
     select(model, interaction, effect) %>%
     pivot_wider(values_from = effect, names_from = model, values_fill = "") %>% 
     knitr::kable(caption = "PBE: significant effect directions")
-
 ```
 
 **Conclusions:**
@@ -955,15 +959,13 @@ Our `PBE` flag is a binary variable, so is its importance being under-valued by 
 ```{r conditional-inference}
 #| eval: false
 
-set.seed(123)
-training <- sample(nrow(test), 0.9 * nrow(test), replace = FALSE)
-m_ci <- cforest(sqrt_Rs_annual ~ ., data = test[training,])
+m_ci <- cforest(sqrt_Rs_annual ~ ., data = dat_pbe)
+summary(m_ci)
 message("Variable importance of CI forest:")
 sort(varimp(m_ci), decreasing = TRUE)
 
-obs <- test[-training,]$sqrt_Rs_annual
-preds <- predict(m_ci, newdata = test[-training,])
-message("R2 against validation data = ", round(r2(preds = preds, obs = obs), 3))
+message("TODO: k-fold validation R2")
+
 ```
 
 **Conclusion: no evidence that conditional inference random forest produces different results.**
