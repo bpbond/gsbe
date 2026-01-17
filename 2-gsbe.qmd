@@ -387,7 +387,7 @@ will be a magic bullet.**
 #| fig-width: 10
 #| fig-height: 6
 
-# Fit random forest model and test against validation data
+# Fit linear model and test against validation data
 # The dependent variable is in the first column
 fit_and_test_lm <- function(x_train, x_val, m) {
     pred_train <- predict(m, newdata = x_train)
@@ -425,7 +425,7 @@ for(dv in dvs) {
 bind_rows(kf_out) %>% 
     group_by(dv) %>% 
     summarise(across(everything(), mean), .groups = "keep") %>% 
-    mutate(across(everything(), round, digits = 3)) %>% 
+    mutate(across(everything(), \(x) round(x, digits = 3))) %>% 
     ungroup() %>% 
     mutate(k = K_FOLD) # just so it's "10" or whatever as expected
 
@@ -629,9 +629,9 @@ Define a PBE ("potential Birch effect") flag using the post-drought
 conditions above: PBE <= -1 the previous year and PBE >0 = the year of
 Rs measurement.
 
-## Linear model: PBE importance and interactions
+## PBE importance and interactions
 
-```{r test-linear}
+```{r test-pbe}
 #| fig-width: 10
 #| fig-height: 6
 
@@ -641,6 +641,21 @@ dat_test_spei %>%
     mutate(PBE = SPEI12_y1 <= -1 & SPEI12 > 0) %>% 
     dplyr::select(-starts_with("SPEI")) ->
     dat_pbe
+dat_pbe %>% 
+    select(-PBE) -> 
+    dat_no_pbe
+
+message("Fitting Rs_annual RF model with PBE (SPEI12, -1.0) effect...")
+rf_pbe <- ranger(sqrt_Rs_annual ~ ., data = dat_pbe, importance = "impurity")
+print(rf_pbe)
+importance_pvalues(rf_pbe, "altmann", 
+                   num.permutations = 100,
+                   formula = sqrt_Rs_annual ~ ., 
+                   data = dat_pbe)
+rf_no_pbe <- ranger(sqrt_Rs_annual ~ ., data = dat_no_pbe, importance = "impurity")
+
+message("Model *with* PBE flag: OOB R2 = ", round(rf_pbe$r.squared, 4))
+message("Model *without* PBE flag: OOB R2 = ", round(rf_no_pbe$r.squared, 4))
 
 message("Fitting Rs_annual linear model with PBE (SPEI12, -1.0) effect...")
 m_Rs_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
