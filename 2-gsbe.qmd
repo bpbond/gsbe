@@ -639,17 +639,17 @@ Rs measurement.
 # SPEI_y1
 dat_test_spei %>% 
     mutate(PBE = SPEI12_y1 <= -1 & SPEI12 > 0) %>% 
-    dplyr::select(-ends_with("_y1")) ->
+    dplyr::select(-starts_with("SPEI")) ->
     dat_pbe
 
 message("Fitting Rs_annual linear model with PBE (SPEI12, -1.0) effect...")
-m_Rs <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
+m_Rs_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
             VWC_lev1 + I(VWC_lev1 ^ 2)) * PBE +
             Ecosystem_type + LAI_high * LAI_low + 
             Veg_type_hi + Veg_type_low + Soil_type_name,
         data = dat_pbe)
-m_Rs_reduced <- MASS::stepAIC(m_Rs, trace = FALSE)
-car::Anova(m_Rs_reduced, type = "III")
+m_Rs_PBE_reduced <- MASS::stepAIC(m_Rs_PBE, trace = FALSE)
+car::Anova(m_Rs_PBE_reduced, type = "III")
 
 message("Fitting Rs_annual linear model without PBE effect...")
 m_Rs_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
@@ -660,11 +660,11 @@ m_Rs_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
 m_Rs_no_PBE_reduced <- MASS::stepAIC(m_Rs_no_PBE, trace = FALSE)
 
 message("Linear model without PBE flag: training R2 = ", lm_r2(m_Rs_no_PBE_reduced))
-message("Linear model with PBE flag: training R2 = ", lm_r2(m_Rs_reduced))
+message("Linear model with PBE flag: training R2 = ", lm_r2(m_Rs_PBE_reduced))
 message("ANOVA model comparison p-value: ", 
-        anova_p_twomodels(m_Rs_reduced, m_Rs_no_PBE_reduced))
+        anova_p_twomodels(m_Rs_PBE_reduced, m_Rs_no_PBE_reduced))
 
-tibble(model_with_PBE = predict(m_Rs),
+tibble(model_with_PBE = predict(m_Rs_PBE),
        model_without_PBE = predict(m_Rs_no_PBE),
        PBE = dat_pbe$PBE, 
        Ecosystem_type = dat_pbe$Ecosystem_type) %>% 
@@ -676,7 +676,7 @@ tibble(model_with_PBE = predict(m_Rs),
 
 # Extract the significant interactions between PBE and other variables 
 message("Interactive PBE effects:")
-tidy(m_Rs_reduced) %>% 
+tidy(m_Rs_PBE_reduced) %>% 
     mutate(model = "Rs_annual") %>% 
     filter(grepl("PBE", term)) %>% 
     separate(term, into = c("interaction", "PBE"), fill = "left", sep = ":") %>% 
