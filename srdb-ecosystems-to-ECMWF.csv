@@ -1,0 +1,35 @@
+SRDB_ecosystem_type,SRDB_leaf_habit,Mapped_ECMWF_category
+Forest,Evergreen,Evergreen needleleaf trees
+Forest,Deciduous,Deciduous broadleaf trees
+Forest,Mixed,Deciduous broadleaf trees
+Forest,,Deciduous broadleaf trees
+Grassland,Evergreen,Grass
+Grassland,Deciduous,Grass
+Grassland,Mixed,Grass
+Grassland,,Grass
+Wetland,Evergreen,Wetland
+Wetland,Deciduous,Wetland
+Wetland,Mixed,Wetland
+Wetland,,Wetland
+Peatland,Evergreen,Wetland
+Peatland,Deciduous,Wetland
+Peatland,Mixed,Wetland
+Peatland,,Wetland
+Shrubland,Evergreen,Evergreen shrubs
+Shrubland,Deciduous,Deciduous shrubs
+Shrubland,Mixed,Evergreen shrubs
+Shrubland,,Deciduous shrubs
+Desert,Evergreen,Desert
+Desert,Deciduous,Desert
+Desert,Mixed,Desert
+Desert,,Desert
+Savanna,Evergreen,Mixed forest/woodland
+Savanna,Deciduous,Mixed forest/woodland
+Tundra,Evergreen,Tundra
+Tundra,Deciduous,Tundra
+Tundra,Mixed,Tundra
+Tundra,,Tundra
+Urban,,
+Bare,,
+Mixed,Evergreen,Mixed forest/woodland
+Mixed,Deciduous,Mixed forest/woodland
