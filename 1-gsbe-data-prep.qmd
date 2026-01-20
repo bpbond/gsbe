@@ -713,7 +713,7 @@ srdb_sample_ecosystems %>%
 
 srdb_sample_ecosystems %>% 
     select(-starts_with("SRDB_"), -ECMWF_category,
-           -Mapped_ECMWF_category, -Veg_type_hi, -Veg_type_low) %>% 
+           -Mapped_ECMWF_category, -Veg_type, -Veg_type_hi, -Veg_type_low) %>% 
     rename(Ecosystem_type_ECMWF = Mapped_ECMWF_category_final) ->
     srdb_sample
 ```
