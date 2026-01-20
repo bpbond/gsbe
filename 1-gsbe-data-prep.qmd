@@ -37,12 +37,12 @@ read_csv("data-srdb/srdb-data.csv", show_col_types = FALSE) %>%
            Latitude, Longitude, Elevation, Manipulation, 
            Biome, Ecosystem_state, 
            Rs_annual, Rh_annual, Rs_growingseason,
+           Ecosystem_type,
            # intercomparison columns -- will not be used afterwards
-           SRDB_ecosystem_type = Ecosystem_type,
            SRDB_study_temp = Study_temp, SRDB_study_precip = Study_precip, 
            SRDB_GPP = GPP, SRDB_ANPP = ANPP, SRDB_leaf_habit = Leaf_habit) %>% 
     filter(Manipulation == "None") %>% 
-    filter(!SRDB_ecosystem_type %in% c("Agriculture", "Bare", "Urban")) %>% 
+    filter(!Ecosystem_type %in% c("Agriculture", "Bare", "Urban")) %>% 
     filter(!is.na(Longitude), !is.na(Latitude), !is.na(Study_midyear)) %>% 
     filter(!is.na(Rs_growingseason) | !is.na(Rs_annual) | !is.na(Rh_annual)) %>% 
     select(-Elevation, -Manipulation) %>% 
@@ -627,42 +627,82 @@ ggplot(srdb_sample, aes(SRDB_ANPP, MODIS_NPP)) +
     geom_abline()
 ```
 
-We want to use the ECMWF land cover codes (`tvh` -- type of high vegetation)
-for modeling, because they're wall-to-wall global,
-but also to take advantage of the 'local knowledge'
-of the SRBD `Ecosystem_type` information. So we overwrite the former
-with the latter in the joined dataset.
+We want to use the ECMWF land cover codes (`tvh` and `tvl`-- type of high and low vegetation, respectively) for modeling, because they're wall-to-wall global, but also to take advantage of the 'local knowledge' of the SRBD `Ecosystem_type` information.
+
+```{r comparisons}
+#| fig-width: 8
+#| fig-height: 6
+
+era5_veg_names <- read_csv("data-ERA5/ECMWF_land_cover_codes.csv", col_types = "ic")
+srdb_ecosystem_map <- read_csv("srdb-ecosystems-to-ECMWF.csv", col_types = "ccc")
+
+srdb_sample %>% 
+    # use high veg category if available, otherwise low
+    mutate(Veg_type = if_else(is.na(Veg_type_hi), Veg_type_low, Veg_type_hi)) %>% 
+    # mapping between numbers and names
+    left_join(era5_veg_names, 
+              by = c("Veg_type" = "Number")) %>%
+    left_join(srdb_ecosystem_map,
+              by = c("Ecosystem_type" = "SRDB_ecosystem_type",
+                     "SRDB_leaf_habit" = "SRDB_leaf_habit")) %>% 
+    # in several cases we going to overwrite the ECMWF category 
+    # First, when it's (1) NA (cause by Veg_type 0, placed on coasts 
+    # being mapped to water) or (2) Crops, mixed farming 
+    mutate(Mapped_ECMWF_category_final = 
+               if_else(is.na(ECMWF_category) | ECMWF_category == "Crops, Mixed farming",
+                       Mapped_ECMWF_category, ECMWF_category)) %>% 
+    # points marked as wetlands in SRDB need to stay that way
+    mutate(Mapped_ECMWF_category_final = 
+               if_else(Ecosystem_type %in% c("Wetland", "Peatland"),
+                       "Wetland", Mapped_ECMWF_category_final)) %>% 
+    # deserts can only map to desert
+    mutate(Mapped_ECMWF_category_final = 
+               if_else(Ecosystem_type == "Desert",
+                       "Desert", Mapped_ECMWF_category_final)) %>% 
+    # tundra can only map to tundra
+    mutate(Mapped_ECMWF_category_final = 
+               if_else(Ecosystem_type == "Tundra",
+                       "Tundra", Mapped_ECMWF_category_final)) %>% 
+    # similarly, Grassland shouldn't map to any tree categories
+    # (but can map to interrupted / mixed woodland)
+    mutate(Mapped_ECMWF_category_final = 
+               if_else(Ecosystem_type == "Grassland" & 
+                           grepl("trees", Mapped_ECMWF_category_final),
+                       "Grass", Mapped_ECMWF_category_final)) %>% 
+    # finally, if forest maps to grass, change that to interrupted forest
+    mutate(Mapped_ECMWF_category_final = 
+               if_else(Ecosystem_type == "Forest" & 
+                           Mapped_ECMWF_category_final == "Grass",
+                       "Interrupted forest", Mapped_ECMWF_category_final)) ->
+    srdb_sample_ecosystems
+
+ggplot(srdb_sample_ecosystems, 
+      aes(Ecosystem_type, ECMWF_category, color = SRDB_leaf_habit)) + 
+    geom_jitter() +
+    ggtitle("How SRDB Ecosystem_type corresponds (lat/lon) to ECMWF category")
+
+
+```
+
+So in some cases, we overwrite the former with the ECMWF categories using SRDB information:
+
+-   We know that ECMWF `NA` (0, oceans) or crop is incorrect, so those observations get the SRDB mapping
+
+-   SRDB wetlands, deserts, and tundras can't be mapped to another category
+
+-   SRDB grasslands can't be remapped to forests, but they can be mapped to interrupted forests or woodlands
+
+-   SRDB forests can't be mapped to grasslands; we change that to interrupted forest.
 
 ```{r ecosystem-type}
 #| fig-width: 8
 #| fig-height: 6
 
-era5_highveg_names <- read_csv("data-ERA5/ECMWF_land_cover_codes.csv", col_types = "ic")
-srdb_ecosystem_map <- read_csv("srdb-ecosystems-to-ECMWF.csv", col_types = "ccc")
-
-srdb_sample %>% 
-    left_join(era5_highveg_names, 
-              by = c("Veg_type_hi" = "Number")) %>%
-    left_join(srdb_ecosystem_map,
-              by = c("SRDB_ecosystem_type" = "SRDB_ecosystem_type",
-                     "SRDB_leaf_habit" = "SRDB_leaf_habit")) %>% 
-    # the two cases we're going to overwrite the ECMWF category 
-    # are when it's (1) NA or (2) Crops, mixed farming 
-    mutate(Mapped_ECMWF_category_final = 
-               if_else(is.na(ECMWF_category) | ECMWF_category == "Crops, Mixed farming",
-                       Mapped_ECMWF_category, ECMWF_category)) ->
-    srdb_sample_ecosystems
-
 ggplot(srdb_sample_ecosystems, 
-      aes(SRDB_ecosystem_type, Mapped_ECMWF_category, color = SRDB_leaf_habit)) + 
-    geom_jitter() +
-    ggtitle("How SRDB Ecosystem_type maps to ECMWF category")
-
-ggplot(srdb_sample_ecosystems, 
-      aes(ECMWF_category, Mapped_ECMWF_category_final, color = SRDB_leaf_habit)) + 
+      aes(Ecosystem_type, Mapped_ECMWF_category_final, color = SRDB_leaf_habit)) + 
     geom_jitter() +
     theme(axis.text.x = element_text(angle = 90)) +
-    ggtitle("How ECMWF categories get replaced by SRDB-derived categories")
+    ggtitle("What final ECMWF category is used for each SRDB point")
 
 message("Mismatches (ECMWF categories being overwritten by SRDB categories):")
 srdb_sample_ecosystems %>% 
@@ -673,8 +713,8 @@ srdb_sample_ecosystems %>%
 
 srdb_sample_ecosystems %>% 
     select(-starts_with("SRDB_"), -ECMWF_category,
-           -Mapped_ECMWF_category, -Veg_type_hi) %>% 
-    rename(Ecosystem_type = Mapped_ECMWF_category_final) ->
+           -Mapped_ECMWF_category, -Veg_type_hi, -Veg_type_low) %>% 
+    rename(Ecosystem_type_ECMWF = Mapped_ECMWF_category_final) ->
     srdb_sample
 ```
 
@@ -756,9 +796,9 @@ srdb_sample %>% select(Precip, VWC_lev1, VWC_lev2) %>%
     filter(complete.cases(.)) %>%
     cor()
 
-OUTFILE <- "srdb_joined_data.csv"
+OUTFILE <- "srdb_joined_data.parquet"
 message("Writing ", OUTFILE)
-write_csv(srdb_sample, OUTFILE)
+write_parquet(srdb_sample, OUTFILE)
 
 DT::datatable(srdb_sample)
 ```
