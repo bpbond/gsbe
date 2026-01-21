@@ -40,6 +40,8 @@ source("utilities.R")
 
 # Background and science questions
 
+After the rewetting of dry soils, for example precipitation following drought, a transient 'Birch effect' can occur due to he interaction of substrate concentration and soil moisture (Moyano et al. 2013). This can constitute a significant proportion of ecosystem soil CO2 efflux in arid and mesic ecosystems (Birch, 1958; Fierer and Schimel, 2002; Borken and Matzner, 2009).
+
 (short background)
 
 We ask four questions of increasing specificity:
@@ -56,7 +58,7 @@ We ask four questions of increasing specificity:
 
 ```{r read-data}
 
-dat <- read_csv("srdb_joined_data.csv", show_col_types = FALSE)
+dat <- read_parquet("srdb_joined_data.parquet")
 
 message(nrow(dat), " rows of data")
 
@@ -72,21 +74,21 @@ dat %>%
                                                           "Savanna", "Shrubland", "Wetland"),
                                     true = Ecosystem_type, 
                                     false = "Other",
-                                    missing = "Other"),
-           # vivid::pdpVars() below needs things as factors not char
-           Ecosystem_type = as.factor(Ecosystem_type),
+                                    missing = "Other")) %>% 
+    # vivid::pdpVars() and xgb need things as factors not char
+    mutate(Ecosystem_type = as.factor(Ecosystem_type),
+           Ecosystem_type_ECMWF = as.factor(Ecosystem_type_ECMWF),
            Soil_type_name = as.factor(Soil_type_name)) ->
     dat_filtered
 
 message("After filtering, ", nrow(dat_filtered), " rows of data")
 ```
+
 ## Collinearity
 
- `Tair`, `Tsoil_lev1`, and `Tsoil_lev2` are *highly* correlated
-with each other (`see 1-gsbe-data-prep`), so drop level 2.
+`Tair`, `Tsoil_lev1`, and `Tsoil_lev2` are *highly* correlated with each other (`see 1-gsbe-data-prep`), so drop level 2.
 
-`VWC_lev1` and `VWC_lev2` are *highly* correlated with each
-other (see `1-gsbe-data-prep`), so drop level 2.
+`VWC_lev1` and `VWC_lev2` are *highly* correlated with each other (see `1-gsbe-data-prep`), so drop level 2.
 
 ## Dependent variable distribution
 
@@ -134,7 +136,6 @@ Wright, M. N. and Ziegler, A.: Ranger: A fast implementation of random forests f
 ```{r base-rf}
 #| fig-width: 10
 #| fig-height: 6
-#| cache: true
 
 # Fit random forest model and test against validation data
 # The independent variable is in the first column
@@ -171,10 +172,14 @@ dat_filtered %>%
            # VWC_lev1 and VWC_lev2 are *highly* correlated with each
            # other (see 1-gsbe-data-prep), so drop level 2
            Precip, VWC_lev1, #VWC_lev2, 
-           LAI_high, LAI_low, Ecosystem_type,
+           # see the "Which ecosystem type..." section below; here we drop the
+           # SRDB "Ecosystem_type" field and use our remapped ECMWF vegetation
+           # type instead; see more information in the `1-gsbe-data-prep` script
+           Ecosystem_type = Ecosystem_type_ECMWF,
            starts_with("SPEI"),
            MODIS_NPP, MODIS_GPP,
-           Veg_type_hi, Veg_type_low, Soil_type_name) ->
+           LAI_high, LAI_low,
+           Soil_type_name) ->
     dat_base_all
 
 # Base test dataset without MODIS or SPEI data
@@ -245,12 +250,13 @@ ggplot(kf_out, aes(n, validation_r2)) +
     ggtitle("Validation R2 for Rs_annual, Rh_annual, and Rs_growingseason")
 ```
 
-## How important are the MODIS data?
+## Roads not taken
+
+### How important are the MODIS data?
 
 The MODIS data only start in 2001 (see `gsbe-data-prep` output), so requiring them in a model cuts off a lot of early data – on the order of 20% of the dataset. Are they needed?
 
 ```{r test-modis}
-#| cache: true
 
 dat_base_all %>% 
     select(-sqrt_Rh_annual, -sqrt_Rs_growingseason, -starts_with("SPEI")) %>% 
@@ -271,12 +277,52 @@ importance_pvalues(rf_modis, "altmann",
 
 **Conclusion: it doesn't seem like they're needed.**
 
-## Roads not taken
+### Which ecosystem type should we use?
+
+```{r ecosystem-type}
+# Make datasets with each ecosystem type and find out!
+dat_filtered %>%
+    select(sqrt_Rs_annual, Tair, Tsoil_lev1, VWC_lev1, SPEI12, 
+           Ecosystem_type, LAI_high, LAI_low, Soil_type_name) %>% 
+    filter(complete.cases(.)) ->
+    dat_srdb_eco
+dat_filtered %>%
+    select(sqrt_Rs_annual, Tair, Tsoil_lev1, VWC_lev1, SPEI12, 
+           Ecosystem_type_ECMWF, LAI_high, LAI_low, Soil_type_name) %>% 
+    filter(complete.cases(.)) ->
+    dat_ecmwf_eco
+
+# Fit rf with each ecosystem type and compare
+rf_eco1 <- ranger(sqrt_Rs_annual ~ ., data = dat_srdb_eco)
+rf_eco2 <- ranger(sqrt_Rs_annual ~ ., data = dat_ecmwf_eco)
+message("rf model with SRDB ecosystem type: OOB R2 = ", round(rf_eco1$r.squared, 4))
+message("rf model with ECMWF ecosystem type: OOB R2 = ", round(rf_eco2$r.squared, 4))
+
+# Fit lm with each ecosystem type and compare
+lm_eco1 <- lm(sqrt_Rs_annual ~ Tair + Tsoil_lev1 + 
+               VWC_lev1 + I(VWC_lev1 ^ 2) * SPEI12 + 
+               Ecosystem_type + 
+               LAI_high * LAI_low + 
+               Soil_type_name,
+           data = dat_srdb_eco)
+lm_eco1_reduced <- MASS::stepAIC(lm_eco1, trace = FALSE)
+lm_eco2 <- lm(sqrt_Rs_annual ~ Tair + Tsoil_lev1 + 
+               VWC_lev1 + I(VWC_lev1 ^ 2) * SPEI12 + 
+               Ecosystem_type_ECMWF + 
+               LAI_high * LAI_low + 
+               Soil_type_name,
+           data = dat_ecmwf_eco)
+lm_eco2_reduced <- MASS::stepAIC(lm_eco2, trace = FALSE)
+
+message("lm model with SRDB ecosystem type: OOB R2 = ", lm_r2(lm_eco1_reduced))
+message("lm model with ECMWF ecosystem type: OOB R2 = ", lm_r2(lm_eco2_reduced))
+```
+
+**Conclusion: it doesn't seem to make much difference.**
 
 ### Test spatial Random Forest
 
-Spatial autocorrelation wouldn't change the fit of the model, but it could 
-bias the variable importance metrics. Evaluate.
+Spatial autocorrelation wouldn't change the fit of the model, but it could bias the variable importance metrics. Evaluate.
 
 ```{r spatial-rf}
 # This needs the newest version 1.1.5, not yet on CRAN
@@ -304,8 +350,7 @@ spatialRF::rf(data = dat_spatial_test,
 
 ### Test XGBoost
 
-Is there any reason to think that this popular algorithm would out-perform
-our Random Forest approach, and/or give different answers?
+Is there any reason to think that this popular algorithm would out-perform our Random Forest approach, and/or give different answers?
 
 ```{r xgboost}
 fit_and_test_xgboost <- function(x_train, x_val) {
@@ -316,7 +361,7 @@ fit_and_test_xgboost <- function(x_train, x_val) {
            validation_r2 = r2(pred_val, pull(x_val[1])))
 }
 
-m_xgb <- xgboost(dat_base_Rs_annual[-1], dat_base_Rs_annual[1])
+m_xgb <- xgboost(dat_base_Rs_annual[-1], y = dat_base_Rs_annual[1])
 message("Variable importance of XGBoost model:")
 as_tibble(xgb.importance(m_xgb))
 
@@ -327,20 +372,15 @@ do_k_fold(dat_base_Rs_annual, fit_and_test_xgboost) %>%
 
 Seems like xgboost is over-fitting to the training data. Note however that
 
-> Unlike random forests, GBMs can have high variability in accuracy dependent 
-on their hyperparameter settings [(Probst, Bischl, and Boulesteix 2018)](https://arxiv.org/abs/1802.09596) So tuning can require much more 
-strategy than a random forest model.
+> Unlike random forests, GBMs can have high variability in accuracy dependent on their hyperparameter settings [(Probst, Bischl, and Boulesteix 2018)](https://arxiv.org/abs/1802.09596) So tuning can require much more strategy than a random forest model.
 
 **Conclusion: performance and variable importance seem similar to `ranger`.**
 
 ### Test neural network
 
-We use the `neuralnet` package for this. I experimented with the hidden layer
-topology and threshold settings to find a configuration that reliably converges
-with these data. Note: fitting this is *slow*.
+We use the `neuralnet` package for this. I experimented with the hidden layer topology and threshold settings to find a configuration that reliably converges with these data. Note: fitting this is *slow*.
 
 ```{r neuralnet}
-#| cache: true
 #| eval: false
 
 # eval:false above b/c this is SO SLOW
@@ -380,11 +420,9 @@ do_k_fold(x, fit_and_test_nn) %>%
     summary()
 ```
 
-With a complex topology (e.g., three hidden layers) the training R2
-can be cranked up to 0.9+, but it exhibits severe overfitting.
+With a complex topology (e.g., three hidden layers) the training R2 can be cranked up to 0.9+, but it exhibits severe overfitting.
 
-**Conclusion: I'm not an expert here! But, no evidence that this
-will be a magic bullet.**
+**Conclusion: I'm not an expert here! But, no evidence that this will be a magic bullet.**
 
 ## Linear regression model: performance
 
@@ -405,10 +443,11 @@ fit_and_test_lm <- function(x_train, x_val, m) {
 
 message("Fitting Rs_annual linear model...")
 m_Rs <- lm(sqrt_Rs_annual ~ Tair + Tsoil_lev1 + 
-            VWC_lev1 + I(VWC_lev1 ^ 2) + 
-            Ecosystem_type + LAI_high * LAI_low + 
-            Veg_type_hi + Veg_type_low + Soil_type_name,
-        data = dat_base_Rs_annual)
+               VWC_lev1 + I(VWC_lev1 ^ 2) + 
+               Ecosystem_type + 
+               LAI_high * LAI_low + 
+               Soil_type_name,
+           data = dat_base_Rs_annual)
 m_Rs_reduced <- MASS::stepAIC(m_Rs, trace = FALSE)
 summary(m_Rs_reduced)
 par(mfrow = c(2, 2))
@@ -455,7 +494,6 @@ tibble(Ecosystem_type = dat_base_Rs_annual$Ecosystem_type,
 # 1. Predictive value of SPEI
 
 ```{r spei-value}
-#| cache: true
 
 dat_base_all %>% 
     select(-sqrt_Rh_annual, -sqrt_Rs_growingseason,
@@ -481,11 +519,12 @@ message("Model *without* SPEI data: OOB R2 = ", round(rf_all_data$r.squared, 4))
 
 message("Testing linear model...")
 m_Rs_spei <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + 
-            VWC_lev1 + I(VWC_lev1 ^ 2)) * 
-               SPEI12 +
-            Ecosystem_type + LAI_high * LAI_low + 
-            Veg_type_hi + Veg_type_low + Soil_type_name,
-        data = dat_test_spei_current)
+                                      VWC_lev1 + I(VWC_lev1 ^ 2)) * 
+                    SPEI12 +
+                    Ecosystem_type + 
+                    LAI_high * LAI_low + 
+                    Soil_type_name,
+                data = dat_test_spei_current)
 m_Rs_spei_reduced <- MASS::stepAIC(m_Rs_spei, trace = FALSE)
 car::Anova(m_Rs_spei_reduced, type = "III")
 
@@ -520,11 +559,12 @@ importance_pvalues(rf_spei_y1, "altmann",
 
 message("Testing linear model...")
 m_Rs_spei_y1 <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + 
-            VWC_lev1 + I(VWC_lev1 ^ 2)) * 
-               (SPEI12 + SPEI12_y1) +
-            Ecosystem_type + LAI_high * LAI_low + 
-            Veg_type_hi + Veg_type_low + Soil_type_name,
-        data = dat_test_spei)
+                                         VWC_lev1 + I(VWC_lev1 ^ 2)) * 
+                       (SPEI12 + SPEI12_y1) +
+                       Ecosystem_type + 
+                       LAI_high * LAI_low + 
+                       Soil_type_name,
+                   data = dat_test_spei)
 m_Rs_spei_y1_reduced <- MASS::stepAIC(m_Rs_spei_y1, trace = FALSE)
 car::Anova(m_Rs_spei_y1_reduced, type = "III")
 
@@ -534,8 +574,7 @@ message("ANOVA model comparison p-value: ",
         anova_p_twomodels(m_Rs_spei_y1_reduced, m_Rs_spei_reduced))
 ```
 
-**BUT there's a problem with the above.** 
-Fit a model with *random* previous-year SPEI data:
+**BUT there's a problem with the above.** Fit a model with *random* previous-year SPEI data:
 
 ```{r random-speiyr1}
 dat_test_spei %>% 
@@ -553,11 +592,12 @@ Use an ANOVA to compare the (reduced) models with and without previous-year SPEI
 
 ```{r random-speiyr1-anova}
 m_spei_random2 <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 + 
-            VWC_lev1 + I(VWC_lev1 ^ 2)) * 
-               (SPEI12) +
-            Ecosystem_type + LAI_high * LAI_low + 
-            Veg_type_hi + Veg_type_low + Soil_type_name,
-        data = dat_test_spei_random)
+                                           VWC_lev1 + I(VWC_lev1 ^ 2)) * 
+                         (SPEI12) +
+                         Ecosystem_type + 
+                         LAI_high * LAI_low + 
+                         Soil_type_name,
+                     data = dat_test_spei_random)
 m_spei_random2_reduced <- MASS::stepAIC(m_spei_random2, trace = FALSE)
 
 anova(m_spei_random1_reduced, m_spei_random2_reduced)
@@ -573,9 +613,7 @@ anova(m_spei_random1_reduced, m_spei_random2_reduced)
 
 # 3. Value of previous-year SPEI *after drought*
 
-Similar to the previous section but focused on *post-drought observations* 
-(was SPEI <= -1 the previous year but now, in year of Rs measurement, 
-SPEI is >= 0).
+Similar to the previous section but focused on *post-drought observations* (was SPEI \<= -1 the previous year but now, in year of Rs measurement, SPEI is \>= 0).
 
 ```{r post-drought}
 dat_test_spei %>% 
@@ -630,9 +668,7 @@ message("ANOVA model comparison p-value: ",
 
 Are post-drought observations 'different'?
 
-Define a PBE ("potential Birch effect") flag using the post-drought
-conditions above: PBE <= -1 the previous year and PBE >0 = the year of
-Rs measurement.
+Define a PBE ("potential Birch effect") flag using the post-drought conditions above: PBE \<= -1 the previous year and PBE \>0 = the year of Rs measurement.
 
 ## PBE importance and interactions
 
@@ -668,19 +704,21 @@ message("Model *without* PBE flag: OOB R2 = ", round(rf_no_pbe$r.squared, 4))
 
 message("Fitting linear model with PBE (SPEI12, -1.0) effect...")
 m_Rs_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
-            VWC_lev1 + I(VWC_lev1 ^ 2)) * PBE +
-            Ecosystem_type + LAI_high * LAI_low + 
-            Veg_type_hi + Veg_type_low + Soil_type_name,
-        data = dat_pbe)
+                                     VWC_lev1 + I(VWC_lev1 ^ 2)) * PBE +
+                   Ecosystem_type +
+                   LAI_high * LAI_low + 
+                   Soil_type_name,
+               data = dat_pbe)
 m_Rs_PBE_reduced <- MASS::stepAIC(m_Rs_PBE, trace = FALSE)
 car::Anova(m_Rs_PBE_reduced, type = "III")
 
 message("Fitting Rs_annual linear model without PBE effect...")
 m_Rs_no_PBE <- lm(sqrt_Rs_annual ~ (Tair + Tsoil_lev1 +
-            VWC_lev1 + I(VWC_lev1 ^ 2)) +
-            Ecosystem_type + LAI_high * LAI_low + 
-            Veg_type_hi + Veg_type_low + Soil_type_name,
-        data = dat_no_pbe)
+                                        VWC_lev1 + I(VWC_lev1 ^ 2)) +
+                      Ecosystem_type + 
+                      LAI_high * LAI_low + 
+                      Soil_type_name,
+                  data = dat_no_pbe)
 m_Rs_no_PBE_reduced <- MASS::stepAIC(m_Rs_no_PBE, trace = FALSE)
 
 message("Linear model without PBE flag: training R2 = ", lm_r2(m_Rs_no_PBE_reduced))
@@ -732,12 +770,9 @@ PBE_interactions %>%
 
 ## PBE sensitivity test
 
-Are the above results due to particular choices about what constitutes
-a drought (the SPEI cutoff value) and/or the SPEI window (12 or 24 months)?
+Are the above results due to particular choices about what constitutes a drought (the SPEI cutoff value) and/or the SPEI window (12 or 24 months)?
 
-Here we test the cutoff SPEI values from Table 1 of 
-[Keune et al. (2025)](https://www.nature.com/articles/s41597-025-04896-y)
-corresponding to "severely dry," "moderately dry," and "mildly dry" conditions.
+Here we test the cutoff SPEI values from Table 1 of [Keune et al. (2025)](https://www.nature.com/articles/s41597-025-04896-y) corresponding to "severely dry," "moderately dry," and "mildly dry" conditions.
 
 ```{r sensitivity-test}
 
@@ -754,11 +789,10 @@ spei_cutoffs <- c(-1.65, -1.28, -0.84)
 spei_windows <- c(12, 24) # months
 
 # Model independent variables
-predictors <- c("Ecosystem_type",
+predictors <- c("Ecosystem_type", 
                 "SPEI12",
                 "Tair", "Precip",
                 "Tsoil_lev1", "VWC_lev1", 
-                "Veg_type_hi", "Veg_type_low", 
                 "LAI_high", "LAI_low", "Soil_type_name")
 
 # Linear model right hand side
@@ -900,13 +934,9 @@ out_smry %>%
 
 From <https://bradleyboehmke.github.io/HOML/random-forest.html>.
 
-Our `PBE` flag is a binary variable, so is its importance being
-under-valued by `ranger`? Test a 
-[conditional inference](https://link.springer.com/article/10.1186/1471-2105-9-307) 
-tree-based forest (note, this is slow):
+Our `PBE` flag is a binary variable, so is its importance being under-valued by `ranger`? Test a [conditional inference](https://link.springer.com/article/10.1186/1471-2105-9-307) tree-based forest (note, this is slow):
 
 ```{r conditional-inference}
-#| cache: true
 
 m_ci <- cforest(sqrt_Rs_annual ~ ., data = dat_pbe)
 print(m_ci)
@@ -943,8 +973,7 @@ do_k_fold(dat_pbe, fit_and_test_ci_rf) %>%
     mutate(k = K_FOLD)
 ```
 
-**Conclusion: no evidence that conditional inference random 
-forest produces different results.**
+**Conclusion: no evidence that conditional inference random forest produces different results.**
 
 # Summary
 
