@@ -937,6 +937,7 @@ From <https://bradleyboehmke.github.io/HOML/random-forest.html>.
 Our `PBE` flag is a binary variable, so is its importance being under-valued by `ranger`? Test a [conditional inference](https://link.springer.com/article/10.1186/1471-2105-9-307) tree-based forest (note, this is slow):
 
 ```{r conditional-inference}
+#| cache: true
 
 m_ci <- cforest(sqrt_Rs_annual ~ ., data = dat_pbe)
 print(m_ci)
