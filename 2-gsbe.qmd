@@ -127,6 +127,40 @@ dat_filtered %>%
 
 **Conclusion: we have a transformation winner: `sqrt()`!**
 
+```{r define-datasets}
+
+# Base test dataset (all three d.v.'s)
+dat_filtered %>% 
+    select(sqrt_Rs_annual, sqrt_Rh_annual, sqrt_Rs_growingseason,
+           # Tair, Tsoil_lev1, and Tsoil_lev2 are *highly* correlated
+           # with each other (see 1-gsbe-data-prep), so drop level 2
+           Tair, Tsoil_lev1, #Tsoil_lev2,
+           # VWC_lev1 and VWC_lev2 are *highly* correlated with each
+           # other (see 1-gsbe-data-prep), so drop level 2
+           Precip, VWC_lev1, #VWC_lev2, 
+           # see the "Which ecosystem type..." section below; here we drop the
+           # remapped ECMWF field and use the native SRDB Ecosystem_type
+           # instead; see more information in the `1-gsbe-data-prep` script
+           Ecosystem_type = Ecosystem_type,
+           starts_with("SPEI"),
+           MODIS_NPP, MODIS_GPP,
+           LAI_high, LAI_low,
+           Soil_type_name) ->
+    dat_base_all
+
+# Base test dataset without MODIS or SPEI data
+dat_base_all %>% 
+    select(-MODIS_NPP, -MODIS_GPP, -starts_with("SPEI")) ->
+    dat_base_no_modispei
+
+# Base test dataset (Rs_annual only)
+dat_base_no_modispei %>% 
+    select(-sqrt_Rh_annual, -sqrt_Rs_growingseason) %>% 
+    filter(complete.cases(.)) -> 
+    dat_base_Rs_annual
+
+```
+
 ## Random Forest model: performance
 
 We are using the `ranger` package.
@@ -163,35 +197,6 @@ fit_and_test_rf <- function(x_train, x_val) {
            pbe_importance = rank(importance(rf))["PBE"])
 }
 
-# Base test dataset (all three d.v.'s)
-dat_filtered %>% 
-    select(sqrt_Rs_annual, sqrt_Rh_annual, sqrt_Rs_growingseason,
-           # Tair, Tsoil_lev1, and Tsoil_lev2 are *highly* correlated
-           # with each other (see 1-gsbe-data-prep), so drop level 2
-           Tair, Tsoil_lev1, #Tsoil_lev2,
-           # VWC_lev1 and VWC_lev2 are *highly* correlated with each
-           # other (see 1-gsbe-data-prep), so drop level 2
-           Precip, VWC_lev1, #VWC_lev2, 
-           # see the "Which ecosystem type..." section below; here we drop the
-           # SRDB "Ecosystem_type" field and use our remapped ECMWF vegetation
-           # type instead; see more information in the `1-gsbe-data-prep` script
-           Ecosystem_type = Ecosystem_type_ECMWF,
-           starts_with("SPEI"),
-           MODIS_NPP, MODIS_GPP,
-           LAI_high, LAI_low,
-           Soil_type_name) ->
-    dat_base_all
-
-# Base test dataset without MODIS or SPEI data
-dat_base_all %>% 
-    select(-MODIS_NPP, -MODIS_GPP, -starts_with("SPEI")) ->
-    dat_base_no_modispei
-
-# Base test dataset (Rs_annual only)
-dat_base_no_modispei %>% 
-    select(-sqrt_Rh_annual, -sqrt_Rs_growingseason) %>% 
-    filter(complete.cases(.)) -> 
-    dat_base_Rs_annual
 
 message("The test complete-cases dataset has ", dim(dat_base_Rs_annual)[1],
         " rows and ", dim(dat_base_Rs_annual)[2], " columns")
@@ -381,7 +386,7 @@ Seems like xgboost is over-fitting to the training data. Note however that
 We use the `neuralnet` package for this. I experimented with the hidden layer topology and threshold settings to find a configuration that reliably converges with these data. Note: fitting this is *slow*.
 
 ```{r neuralnet}
-#| eval: false
+#| cache: true
 
 # eval:false above b/c this is SO SLOW
 
